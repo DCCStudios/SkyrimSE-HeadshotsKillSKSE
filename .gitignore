@@ -1,0 +1,24 @@
+# Build outputs
+build/
+out/
+x64/
+*.obj
+*.pch
+*.lib
+*.exp
+*.dll
+*.pdb
+*.ilk
+*.iobj
+*.ipdb
+
+# Compile output (distributed separately)
+Compile/
+
+# IDE
+.vs/
+*.user
+*.suo
+
+# vcpkg local install
+vcpkg_installed/
