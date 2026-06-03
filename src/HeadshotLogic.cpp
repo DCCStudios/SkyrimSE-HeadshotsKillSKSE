@@ -10,6 +10,8 @@
 #include "RE/H/hkpRigidBody.h"
 #include "RE/H/hkVector4.h"
 #include "RE/T/TESRace.h"
+#include "RE/T/TESHitEvent.h"
+#include "PrecisionAPI.h"
 
 #include <cstring>
 
@@ -42,6 +44,24 @@ namespace HeadshotLogic
 			return a_race && a_test && _stricmp(a_race, a_test) == 0;
 		}
 
+		bool EdidContainsCI(const char* a_edid, const char* a_needle)
+		{
+			if (!a_edid || !a_needle || !a_needle[0]) {
+				return false;
+			}
+			const std::size_t needleLen = std::strlen(a_needle);
+			const std::size_t edidLen = std::strlen(a_edid);
+			if (needleLen > edidLen) {
+				return false;
+			}
+			for (std::size_t i = 0; i + needleLen <= edidLen; ++i) {
+				if (_strnicmp(a_edid + i, a_needle, needleLen) == 0) {
+					return true;
+				}
+			}
+			return false;
+		}
+
 		bool IsSmallAnimalRace(const char* edid)
 		{
 			static const char* k[] = {
@@ -66,8 +86,7 @@ namespace HeadshotLogic
 		}
 		bool IsBearRace(const char* edid)
 		{
-			return RaceEdidEquals(edid, "BearRace") || RaceEdidEquals(edid, "BearSnowRace") ||
-			       RaceEdidEquals(edid, "CaveBearRace") || RaceEdidEquals(edid, "DLC2SnowBearRace");
+			return EdidContainsCI(edid, "Bear");
 		}
 		bool IsMammothRace(const char* edid) { return RaceEdidEquals(edid, "MammothRace"); }
 
@@ -81,24 +100,6 @@ namespace HeadshotLogic
 			};
 			for (auto p = k; *p; ++p) {
 				if (RaceEdidEquals(edid, *p)) {
-					return true;
-				}
-			}
-			return false;
-		}
-
-		bool EdidContainsCI(const char* a_edid, const char* a_needle)
-		{
-			if (!a_edid || !a_needle || !a_needle[0]) {
-				return false;
-			}
-			const std::size_t needleLen = std::strlen(a_needle);
-			const std::size_t edidLen = std::strlen(a_edid);
-			if (needleLen > edidLen) {
-				return false;
-			}
-			for (std::size_t i = 0; i + needleLen <= edidLen; ++i) {
-				if (_strnicmp(a_edid + i, a_needle, needleLen) == 0) {
 					return true;
 				}
 			}
@@ -220,17 +221,33 @@ namespace HeadshotLogic
 			if (!rid) {
 				return true;
 			}
-			if (IsFalmerRace(rid)) {
-				return false;
-			}
 
-			// Check JSON + user race config (user whitelist can override)
+			// User/JSON config takes definitive priority over INI blocklist.
+			// If there's an explicit entry, trust its decision (blocked or whitelisted).
 			std::string ridStr(rid);
-			if (a_s->IsRaceBlockedByConfig(ridStr)) {
-				return true;
+			bool foundInConfig = false;
+			bool configBlocked = false;
+			for (const auto& entry : a_s->userRaceConfig) {
+				if (_stricmp(entry.raceEditorID.c_str(), ridStr.c_str()) == 0) {
+					foundInConfig = true;
+					configBlocked = entry.blocked;
+					break;
+				}
+			}
+			if (!foundInConfig) {
+				for (const auto& entry : a_s->raceConfig) {
+					if (_stricmp(entry.raceEditorID.c_str(), ridStr.c_str()) == 0) {
+						foundInConfig = true;
+						configBlocked = entry.blocked;
+						break;
+					}
+				}
+			}
+			if (foundInConfig) {
+				return configBlocked;
 			}
 
-			// Legacy INI blocklist
+			// Fallback: legacy INI blocklist
 			for (const auto& blocked : a_s->raceBlocklist) {
 				if (!blocked.empty() && _stricmp(rid, blocked.c_str()) == 0) {
 					return true;
@@ -252,9 +269,43 @@ namespace HeadshotLogic
 		float SampleEffectiveChance(Category a_cat, float a_archery, Settings* a_s,
 			const char* a_raceEdid = nullptr)
 		{
+			// Check for per-race category override and useCategoryChance from user/JSON config
+			const RaceConfigEntry* raceEntry = nullptr;
+			if (a_raceEdid && a_raceEdid[0]) {
+				for (const auto& e : a_s->userRaceConfig) {
+					if (_stricmp(e.raceEditorID.c_str(), a_raceEdid) == 0) {
+						raceEntry = &e;
+						break;
+					}
+				}
+				if (!raceEntry) {
+					for (const auto& e : a_s->raceConfig) {
+						if (_stricmp(e.raceEditorID.c_str(), a_raceEdid) == 0) {
+							raceEntry = &e;
+							break;
+						}
+					}
+				}
+			}
+
+			// Apply category override if set
+			Category effectiveCat = a_cat;
+			if (raceEntry && raceEntry->categoryOverride >= 0) {
+				effectiveCat = static_cast<Category>(raceEntry->categoryOverride);
+			}
+
+			// If this race has useCategoryChance=false, use its per-race overrides directly
+			if (raceEntry && !raceEntry->useCategoryChance) {
+				float base = (raceEntry->chanceOverride >= 0.0f) ? raceEntry->chanceOverride : 0.0f;
+				float skillW = (raceEntry->skillWeight >= 0.0f) ? raceEntry->skillWeight : 0.0f;
+				const float arch = std::clamp(a_archery, 0.0f, 100.0f);
+				const float extra = arch * std::clamp(skillW, 0.0f, 2.0f);
+				return std::clamp(base + extra, 0.0f, 100.0f);
+			}
+
 			float base  = 0.0f;
 			float skillW = 0.0f;
-			switch (a_cat) {
+			switch (effectiveCat) {
 			case Category::Humanoid:    base = a_s->chanceHumanoid; break;
 			case Category::SmallAnimal: base = a_s->chanceSmallAnimal; break;
 			case Category::Giant:       base = a_s->chanceGiant;   skillW = a_s->skillInfluenceGiant; break;
@@ -266,13 +317,10 @@ namespace HeadshotLogic
 			default:                    return 0.0f;
 			}
 
-			// Per-race overrides from JSON/user config
-			if (a_raceEdid && a_raceEdid[0]) {
-				std::string edid(a_raceEdid);
-				float raceChance = a_s->GetRaceChanceOverride(edid);
-				if (raceChance >= 0.0f) base = raceChance;
-				float raceSkill = a_s->GetRaceSkillWeightOverride(edid);
-				if (raceSkill >= 0.0f) skillW = raceSkill;
+			// Per-race overrides from JSON/user config (when useCategoryChance is true but overrides exist)
+			if (raceEntry) {
+				if (raceEntry->chanceOverride >= 0.0f) base = raceEntry->chanceOverride;
+				if (raceEntry->skillWeight >= 0.0f) skillW = raceEntry->skillWeight;
 			}
 
 			const float arch  = std::clamp(a_archery, 0.0f, 100.0f);
@@ -470,12 +518,37 @@ namespace HeadshotLogic
 			return false;
 		}
 
-		void DeferKnockHelmetOff(RE::Actor* a_victim, RE::Actor* a_shooter, Settings* a_s, bool a_skipRoll = false)
+		float ComputeKnockoffChanceLocal(float baseChance, RE::TESObjectARMO* helmet,
+			RE::Actor* attacker, bool isMelee, bool is1H, Settings* s, bool isPlayer)
 		{
-			if (!a_skipRoll && !RollPercent(a_s->helmetKnockoffChance)) return;
+			float chance = baseChance;
+			bool useWeight = isPlayer ? s->enablePlayerWeightScaling : s->enableWeightScaling;
+			float wPen = isPlayer ? s->playerWeightPenaltyPerUnit : s->weightPenaltyPerUnit;
+			if (useWeight && helmet) {
+				chance -= helmet->weight * wPen;
+			}
+			bool useSkill = isPlayer ? s->enablePlayerMeleeSkillScaling : s->enableMeleeSkillScaling;
+			float sFactor = isPlayer ? s->playerMeleeSkillBonusFactor : s->meleeSkillBonusFactor;
+			if (useSkill && isMelee && attacker) {
+				auto av = is1H ? RE::ActorValue::kOneHanded : RE::ActorValue::kTwoHanded;
+				chance += attacker->AsActorValueOwner()->GetActorValue(av) * sFactor;
+			}
+			return std::clamp(chance, 0.0f, 100.0f);
+		}
 
+		void DeferKnockHelmetOff(RE::Actor* a_victim, RE::Actor* a_shooter, Settings* a_s,
+			bool a_skipRoll = false, bool a_isMelee = false, bool a_is1H = false)
+		{
 			RE::TESObjectARMO* armor = nullptr;
 			if (!HasKnockoffableHeadArmor(a_victim, a_s, armor) || !armor) return;
+
+			if (!a_skipRoll) {
+				const bool isPlayer = a_victim->IsPlayerRef();
+				float baseChance = isPlayer ? a_s->playerHelmetKnockoffChance : a_s->helmetKnockoffChance;
+				float effectiveChance = ComputeKnockoffChanceLocal(
+					baseChance, armor, a_shooter, a_isMelee, a_is1H, a_s, isPlayer);
+				if (!RollPercent(effectiveChance)) return;
+			}
 
 			const bool isPlayer = a_victim->IsPlayerRef();
 			RE::NiPointer<RE::Actor> victimPtr(a_victim);
@@ -484,16 +557,17 @@ namespace HeadshotLogic
 			const float              linear  = isPlayer ? a_s->playerHelmetDropImpulse : a_s->helmetDropLinearImpulse;
 			const float              angular = a_s->helmetDropAngularImpulse;
 
-			// Frame N+1: RemoveItem
-			SKSE::GetTaskInterface()->AddTask([victimPtr, shooterPtr, armorId, linear, angular, isPlayer]() {
-				auto* victim = victimPtr.get();
-				if (!victim || victim->IsDead()) return;
+		// Frame N+1: RemoveItem
+		SKSE::GetTaskInterface()->AddTask([victimPtr, shooterPtr, armorId, linear, angular, isPlayer]() {
+			auto* victim = victimPtr.get();
+			if (!victim || victim->IsDead()) return;
+			if (!victim->Is3DLoaded() || !victim->Get3D()) return;
 
-				auto* armorForm = RE::TESForm::LookupByID<RE::TESObjectARMO>(armorId);
-				if (!armorForm) return;
+			auto* armorForm = RE::TESForm::LookupByID<RE::TESObjectARMO>(armorId);
+			if (!armorForm) return;
 
-				auto* changes = victim->GetInventoryChanges();
-				if (!changes || !changes->entryList) return;
+			auto* changes = victim->GetInventoryChanges();
+			if (!changes || !changes->entryList) return;
 				bool stillWorn = false;
 				for (auto* entry : *changes->entryList) {
 					if (entry && entry->object && entry->IsWorn() &&
@@ -624,14 +698,17 @@ void HeadshotLogic::OnProjectileImpact(RE::Projectile* a_projectile)
 	// --- Diagnostic log: dump raw impact state before any patching ---
 	if (settings->enableDebugLogging) {
 		const char* matName = "null";
-		const char* matID   = "N/A";
 		std::uint32_t matFlags = 0;
 		if (impact->material) {
-			matName  = impact->material->materialName.c_str();
+			const char* mn = impact->material->materialName.c_str();
+			matName  = mn ? mn : "null";
 			matFlags = static_cast<std::uint32_t>(impact->material->flags.get());
 		}
-		const char* nodeName = impact->damageRootNode
-			? impact->damageRootNode->name.c_str() : "null";
+		const char* nodeName = "null";
+		if (impact->damageRootNode) {
+			const char* nn = impact->damageRootNode->name.c_str();
+			nodeName = nn ? nn : "(empty)";
+		}
 		const bool isBareHead = Hooks::IsBareHead(target);
 		const bool hasProtHelm = HasProtectiveHeadArmor(target);
 
@@ -654,6 +731,14 @@ void HeadshotLogic::OnProjectileImpact(RE::Projectile* a_projectile)
 	//   1) Helmet knocked off by us (g_bareHeads set)
 	//   2) Actor never wore a helmet
 	//   3) Actor wears a 0-rating cosmetic headpiece (hood, circlet)
+	if (!target->Is3DLoaded() || !target->Get3D()) {
+		if (settings->enableDebugLogging) {
+			logger::debug("HeadshotsKill: target {:08X} has no 3D loaded, skipping patch/detection",
+				target->GetFormID());
+		}
+		return;
+	}
+
 	const bool hasNoProtectiveHelmet = !HasProtectiveHeadArmor(target);
 	if (hasNoProtectiveHelmet) {
 		const char* headName = GetRaceHeadNodeName(target);
@@ -668,7 +753,14 @@ void HeadshotLogic::OnProjectileImpact(RE::Projectile* a_projectile)
 			const float dx = hp.x - ip.x;
 			const float dy = hp.y - ip.y;
 			const float dz = hp.z - ip.z;
-			nearHead = (dx * dx + dy * dy + dz * dz < 80.0f * 80.0f);
+			const float distSq = dx * dx + dy * dy + dz * dz;
+
+			// Dynamic radius: use 15% of the head's height above the actor's root.
+			// Humanoids (~128 height): radius ~19. Spiders (~15 height): radius ~2-3.
+			const auto& actorPos = target->GetPosition();
+			const float headHeight = std::abs(hp.z - actorPos.z);
+			const float patchRadius = std::clamp(headHeight * 0.15f, 8.0f, 15.0f);
+			nearHead = (distSq < patchRadius * patchRadius);
 		}
 
 		if (nearHead && headNode) {
@@ -764,6 +856,14 @@ void HeadshotLogic::OnProjectileImpact(RE::Projectile* a_projectile)
 	const char* targetRaceEdid = targetRace ? targetRace->GetFormEditorID() : nullptr;
 	const float archery = shooter ? shooter->AsActorValueOwner()->GetActorValue(RE::ActorValue::kArchery) : 0.0f;
 	const float chance  = SampleEffectiveChance(cat, archery, settings, targetRaceEdid);
+
+	if (settings->enableDebugLogging) {
+		logger::debug("HeadshotsKill: {:08X} race={} cat={} archery={:.0f} chance={:.1f}%",
+			target->GetFormID(),
+			targetRaceEdid ? targetRaceEdid : "null",
+			static_cast<int>(cat), archery, chance);
+	}
+
 	if (!RollPercent(chance)) return;
 
 	if (settings->essentialMode == 0 && target->IsEssential()) return;
@@ -817,6 +917,7 @@ void HeadshotLogic::PostImpactStickFix(RE::Projectile* a_projectile)
 	auto* target = targetRef->As<RE::Actor>();
 	if (!target) return;
 
+	if (!target->Is3DLoaded() || !target->Get3D()) return;
 	if (HasProtectiveHeadArmor(target)) return;
 
 	// Check if the hit is near the head
@@ -848,50 +949,8 @@ void HeadshotLogic::EvaluateHitData(RE::Character* a_character, RE::HitData* a_h
 	auto* settings = Settings::GetSingleton();
 	if (!settings->enableMod) return;
 
-	// --- Melee helmet knockoff (separate from projectile OHKO) ---
-	const bool isMeleeHit = a_hitData->flags.any(RE::HitData::Flag::kMeleeAttack);
-	if (isMeleeHit) {
-		const bool headByLimb = (a_hitData->damageLimb ==
-			static_cast<std::uint32_t>(RE::BGSBodyPartDefs::LIMB_ENUM::kHead));
-		if (headByLimb && a_hitData->weapon) {
-			auto aggH = a_hitData->aggressor.get();
-			auto tgtH = a_hitData->target.get();
-			RE::Actor* attacker = aggH ? aggH->As<RE::Actor>() : nullptr;
-			RE::Actor* victim = tgtH ? tgtH->As<RE::Actor>() : nullptr;
-			if (victim && !victim->IsDead() && HasProtectiveHeadArmor(victim)) {
-				const auto wtype = a_hitData->weapon->GetWeaponType();
-				bool doKnockoff = false;
-				if (victim->IsPlayerRef() && settings->enablePlayerMeleeHelmetKnockoff) {
-					float chance = 0.0f;
-					if (wtype == RE::WEAPON_TYPE::kOneHandSword || wtype == RE::WEAPON_TYPE::kOneHandAxe ||
-					    wtype == RE::WEAPON_TYPE::kOneHandMace || wtype == RE::WEAPON_TYPE::kOneHandDagger) {
-						chance = settings->playerMeleeKnockoffChance1H;
-					} else if (wtype == RE::WEAPON_TYPE::kTwoHandSword || wtype == RE::WEAPON_TYPE::kTwoHandAxe) {
-						chance = settings->playerMeleeKnockoffChance2H;
-					}
-					doKnockoff = RollPercent(chance);
-				} else if (!victim->IsPlayerRef() && settings->enableMeleeHelmetKnockoff) {
-					float chance = 0.0f;
-					if (wtype == RE::WEAPON_TYPE::kOneHandSword || wtype == RE::WEAPON_TYPE::kOneHandAxe ||
-					    wtype == RE::WEAPON_TYPE::kOneHandMace || wtype == RE::WEAPON_TYPE::kOneHandDagger) {
-						chance = settings->meleeKnockoffChance1H;
-					} else if (wtype == RE::WEAPON_TYPE::kTwoHandSword || wtype == RE::WEAPON_TYPE::kTwoHandAxe) {
-						chance = settings->meleeKnockoffChance2H;
-					}
-					doKnockoff = RollPercent(chance);
-				}
-				if (doKnockoff) {
-					if (settings->enableDebugLogging) {
-						logger::debug("HeadshotsKill: melee helmet knockoff on {:08X}", victim->GetFormID());
-					}
-					DeferKnockHelmetOff(victim, attacker, settings, true);
-				}
-			}
-		}
-		return;
-	}
-
-	// Non-melee: reject non-bow/crossbow weapons (spell projectiles are allowed via allowlist)
+	// This hook only fires for projectile attacks. Melee is handled by MeleeHitHandler (TESHitEvent).
+	// Reject non-bow/crossbow weapons (spell projectiles are allowed via allowlist)
 	if (a_hitData->weapon) {
 		const auto wtype = a_hitData->weapon->GetWeaponType();
 		if (wtype != RE::WEAPON_TYPE::kBow && wtype != RE::WEAPON_TYPE::kCrossbow) {
@@ -939,10 +998,26 @@ void HeadshotLogic::EvaluateHitData(RE::Character* a_character, RE::HitData* a_h
 
 		if (HasProtectiveHeadArmor(target)) {
 			// Player has a helmet: attempt knockoff only (no HP reduction, no kill)
-			if (!RollPercent(settings->playerHelmetKnockoffChance)) {
+			// Apply weight scaling (projectile: no melee skill bonus)
+			RE::TESObjectARMO* playerHelmet = nullptr;
+			auto* pChanges = target->GetInventoryChanges();
+			if (pChanges && pChanges->entryList) {
+				for (auto* entry : *pChanges->entryList) {
+					if (entry && entry->object && entry->IsWorn()) {
+						auto* armo = entry->object->As<RE::TESObjectARMO>();
+						if (armo && armo->HasPartOf(RE::BGSBipedObjectForm::BipedObjectSlot::kHead)) {
+							playerHelmet = armo;
+							break;
+						}
+					}
+				}
+			}
+			float effChance = ComputeKnockoffChanceLocal(
+				settings->playerHelmetKnockoffChance, playerHelmet, shooter, false, false, settings, true);
+			if (!RollPercent(effChance)) {
 				if (settings->enableDebugLogging) {
-					logger::debug("HeadshotsKill: player helmet survived knockoff roll ({:.1f}%)",
-						settings->playerHelmetKnockoffChance);
+					logger::debug("HeadshotsKill: player helmet survived knockoff roll (base={:.1f}% eff={:.1f}%)",
+						settings->playerHelmetKnockoffChance, effChance);
 				}
 				return;
 			}
@@ -1137,6 +1212,7 @@ void HeadshotLogic::SimulatePlayerHelmetKnockoff(RE::Actor* a_player, Settings* 
 	SKSE::GetTaskInterface()->AddTask([playerPtr, armorId, impulse]() {
 		auto* victim = playerPtr.get();
 		if (!victim) return;
+		if (!victim->Is3DLoaded() || !victim->Get3D()) return;
 
 		auto* armorForm = RE::TESForm::LookupByID<RE::TESObjectARMO>(armorId);
 		if (!armorForm) return;
@@ -1161,3 +1237,263 @@ void HeadshotLogic::SimulatePlayerHelmetKnockoff(RE::Actor* a_player, Settings* 
 		}
 	});
 }
+
+// =============================================================================
+// Melee Hit Event Handler
+// =============================================================================
+
+HeadshotLogic::MeleeHitHandler* HeadshotLogic::MeleeHitHandler::GetSingleton()
+{
+	static MeleeHitHandler singleton;
+	return &singleton;
+}
+
+RE::BSEventNotifyControl HeadshotLogic::MeleeHitHandler::ProcessEvent(
+	const RE::TESHitEvent* a_event, RE::BSTEventSource<RE::TESHitEvent>*)
+{
+	// If Precision is handling melee head detection, skip the flat-chance fallback
+	if (IsPrecisionActive()) {
+		return RE::BSEventNotifyControl::kContinue;
+	}
+
+	if (!a_event || !a_event->target || !a_event->cause) {
+		return RE::BSEventNotifyControl::kContinue;
+	}
+
+	// Only process melee hits (projectile == 0 means no projectile)
+	if (a_event->projectile != 0) {
+		return RE::BSEventNotifyControl::kContinue;
+	}
+
+	auto* settings = Settings::GetSingleton();
+	if (!settings->enableMod) return RE::BSEventNotifyControl::kContinue;
+
+	auto* victim = a_event->target->As<RE::Actor>();
+	auto* attacker = a_event->cause->As<RE::Actor>();
+	if (!victim || !attacker || victim->IsDead()) {
+		return RE::BSEventNotifyControl::kContinue;
+	}
+
+	// Determine weapon type from the source form
+	auto* weapForm = RE::TESForm::LookupByID(a_event->source);
+	auto* weapon = weapForm ? weapForm->As<RE::TESObjectWEAP>() : nullptr;
+	if (!weapon) return RE::BSEventNotifyControl::kContinue;
+
+	const auto wtype = weapon->GetWeaponType();
+	const bool is1H = (wtype == RE::WEAPON_TYPE::kOneHandSword || wtype == RE::WEAPON_TYPE::kOneHandAxe ||
+	                   wtype == RE::WEAPON_TYPE::kOneHandMace || wtype == RE::WEAPON_TYPE::kOneHandDagger);
+	const bool is2H = (wtype == RE::WEAPON_TYPE::kTwoHandSword || wtype == RE::WEAPON_TYPE::kTwoHandAxe);
+	if (!is1H && !is2H) return RE::BSEventNotifyControl::kContinue;
+
+	// Check if melee knockoff is enabled for this target type
+	float baseChance = 0.0f;
+	const bool isPlayer = victim->IsPlayerRef();
+	if (isPlayer) {
+		if (!settings->enablePlayerMeleeHelmetKnockoff) return RE::BSEventNotifyControl::kContinue;
+		baseChance = is1H ? settings->playerMeleeKnockoffChance1H : settings->playerMeleeKnockoffChance2H;
+	} else {
+		if (!settings->enableMeleeHelmetKnockoff) return RE::BSEventNotifyControl::kContinue;
+		baseChance = is1H ? settings->meleeKnockoffChance1H : settings->meleeKnockoffChance2H;
+	}
+
+	if (!HasProtectiveHeadArmor(victim)) {
+		return RE::BSEventNotifyControl::kContinue;
+	}
+
+	// Get the helmet for weight scaling
+	RE::TESObjectARMO* helmet = nullptr;
+	auto* changes = victim->GetInventoryChanges();
+	if (changes && changes->entryList) {
+		for (auto* entry : *changes->entryList) {
+			if (entry && entry->object && entry->IsWorn()) {
+				auto* armo = entry->object->As<RE::TESObjectARMO>();
+				if (armo && armo->HasPartOf(RE::BGSBipedObjectForm::BipedObjectSlot::kHead)) {
+					helmet = armo;
+					break;
+				}
+			}
+		}
+	}
+
+	float chance = ComputeKnockoffChanceLocal(baseChance, helmet, attacker, true, is1H, settings, isPlayer);
+
+	if (chance <= 0.0f) return RE::BSEventNotifyControl::kContinue;
+	bool success = (chance >= 100.0f);
+	if (!success) {
+		const auto n = static_cast<std::uint32_t>(std::round(chance * 100.0f));
+		const std::uint32_t r = static_cast<std::uint32_t>(rand()) % 10000u;
+		success = (r < std::min<std::uint32_t>(10000u, n));
+	}
+
+	if (success) {
+		if (settings->enableDebugLogging) {
+			logger::debug("HeadshotsKill: melee helmet knockoff on {:08X} (base={:.1f}% effective={:.1f}%)",
+				victim->GetFormID(), baseChance, chance);
+		}
+		DeferKnockHelmetOff(victim, attacker, settings, true, true, is1H);
+	}
+
+	return RE::BSEventNotifyControl::kContinue;
+}
+
+void HeadshotLogic::RegisterMeleeHitSink()
+{
+	auto* holder = RE::ScriptEventSourceHolder::GetSingleton();
+	if (holder) {
+		holder->AddEventSink<RE::TESHitEvent>(MeleeHitHandler::GetSingleton());
+		logger::info("HeadshotsKill: registered melee hit event sink (fallback)");
+	}
+}
+
+// =============================================================================
+// Precision API Integration (optional soft dependency)
+// =============================================================================
+
+static PRECISION_API::IVPrecision1* g_precisionAPI = nullptr;
+static std::atomic<bool> g_precisionActive{ false };
+
+namespace HeadshotLogic
+{
+
+bool IsPrecisionActive()
+{
+	return g_precisionActive.load();
+}
+
+bool TryRegisterPrecision(SKSE::PluginHandle a_pluginHandle)
+{
+	auto* api = static_cast<PRECISION_API::IVPrecision1*>(PRECISION_API::RequestPluginAPI(PRECISION_API::InterfaceVersion::V1));
+	if (!api) {
+		logger::info("HeadshotsKill: Precision not detected, using flat-chance melee fallback");
+		return false;
+	}
+
+	auto result = api->AddPostHitCallback(a_pluginHandle, [](const PRECISION_API::PrecisionHitData& a_hitData, const RE::HitData& a_vanillaHitData) {
+		auto* settings = Settings::GetSingleton();
+		if (!settings->enableMod) return;
+
+		auto* victim = a_hitData.target ? a_hitData.target->As<RE::Actor>() : nullptr;
+		auto* attacker = a_hitData.attacker;
+
+		logger::debug("HeadshotsKill [Precision]: PostHitCallback fired - attacker={:08X} target={:08X} flags={:08X}",
+			attacker ? attacker->GetFormID() : 0,
+			victim ? victim->GetFormID() : 0,
+			a_vanillaHitData.flags.underlying());
+
+		if (!victim || !attacker || victim->IsDead()) return;
+
+		if (!victim->Is3DLoaded() || !victim->Get3D()) return;
+
+		const char* headNodeName = GetRaceHeadNodeName(victim);
+		auto* root = victim->Get3D()->AsNode();
+		if (!root) return;
+
+		RE::BSFixedString bsName(headNodeName);
+		auto* headNode = root->GetObjectByName(bsName);
+		if (!headNode) return;
+
+		const auto& headPos = headNode->world.translate;
+		const auto& hitPos = a_hitData.hitPos;
+		const float dx = hitPos.x - headPos.x;
+		const float dy = hitPos.y - headPos.y;
+		const float dz = hitPos.z - headPos.z;
+		const float distSq = dx * dx + dy * dy + dz * dz;
+
+		const float scale = victim->GetScale();
+		const float radius = 20.0f * scale;
+		const bool isHeadHit = (distSq < radius * radius);
+
+		logger::debug("HeadshotsKill [Precision]: victim={:08X} hitPos=({:.0f},{:.0f},{:.0f}) headPos=({:.0f},{:.0f},{:.0f}) dist={:.1f} radius={:.1f} head={}",
+			victim->GetFormID(), hitPos.x, hitPos.y, hitPos.z, headPos.x, headPos.y, headPos.z, std::sqrt(distSq), radius, isHeadHit);
+
+		if (!isHeadHit) return;
+
+		if (!HasProtectiveHeadArmor(victim)) return;
+
+		auto* weapon = a_vanillaHitData.weapon;
+		if (!weapon) return;
+
+		const auto wtype = weapon->GetWeaponType();
+		const bool is1H = (wtype == RE::WEAPON_TYPE::kOneHandSword || wtype == RE::WEAPON_TYPE::kOneHandAxe ||
+		                   wtype == RE::WEAPON_TYPE::kOneHandMace || wtype == RE::WEAPON_TYPE::kOneHandDagger);
+		const bool is2H = (wtype == RE::WEAPON_TYPE::kTwoHandSword || wtype == RE::WEAPON_TYPE::kTwoHandAxe);
+		if (!is1H && !is2H) return;
+
+		float baseChance = 0.0f;
+		const bool isPlayerVictim = victim->IsPlayerRef();
+		if (isPlayerVictim && settings->enablePlayerMeleeHelmetKnockoff) {
+			baseChance = is1H ? settings->playerMeleeKnockoffChance1H : settings->playerMeleeKnockoffChance2H;
+		} else if (!isPlayerVictim && settings->enableMeleeHelmetKnockoff) {
+			baseChance = is1H ? settings->meleeKnockoffChance1H : settings->meleeKnockoffChance2H;
+		} else {
+			return;
+		}
+
+		// Get helmet for weight scaling
+		RE::TESObjectARMO* helmet = nullptr;
+		auto* changes = victim->GetInventoryChanges();
+		if (changes && changes->entryList) {
+			for (auto* entry : *changes->entryList) {
+				if (entry && entry->object && entry->IsWorn()) {
+					auto* armo = entry->object->As<RE::TESObjectARMO>();
+					if (armo && armo->HasPartOf(RE::BGSBipedObjectForm::BipedObjectSlot::kHead)) {
+						helmet = armo;
+						break;
+					}
+				}
+			}
+		}
+
+		float chance = ComputeKnockoffChanceLocal(baseChance, helmet, attacker, true, is1H, settings, isPlayerVictim);
+
+		if (chance <= 0.0f) return;
+		bool success = (chance >= 100.0f);
+		if (!success) {
+			const auto n = static_cast<std::uint32_t>(std::round(chance * 100.0f));
+			const std::uint32_t r = static_cast<std::uint32_t>(rand()) % 10000u;
+			success = (r < std::min<std::uint32_t>(10000u, n));
+		}
+
+		if (success) {
+			if (settings->enableDebugLogging) {
+				logger::debug("HeadshotsKill [Precision]: melee head knockoff on {:08X} (base={:.1f}% effective={:.1f}%)",
+					victim->GetFormID(), baseChance, chance);
+			}
+			DeferKnockHelmetOff(victim, attacker, settings, true, true, is1H);
+		}
+	});
+
+	if (result == PRECISION_API::APIResult::OK) {
+		g_precisionAPI = api;
+		g_precisionActive.store(true);
+		logger::info("HeadshotsKill: Precision detected! Melee head detection enabled via Precision API");
+		return true;
+	}
+
+	logger::warn("HeadshotsKill: Precision found but callback registration failed ({})",
+		static_cast<int>(result));
+	return false;
+}
+
+float ComputeEffectiveKnockoffChance(float baseChance, RE::TESObjectARMO* helmet,
+	RE::Actor* attacker, bool isMelee, bool is1H, Settings* s, bool isPlayer)
+{
+	float chance = baseChance;
+
+	bool useWeight = isPlayer ? s->enablePlayerWeightScaling : s->enableWeightScaling;
+	float wPen = isPlayer ? s->playerWeightPenaltyPerUnit : s->weightPenaltyPerUnit;
+	if (useWeight && helmet) {
+		chance -= helmet->weight * wPen;
+	}
+
+	bool useSkill = isPlayer ? s->enablePlayerMeleeSkillScaling : s->enableMeleeSkillScaling;
+	float sFactor = isPlayer ? s->playerMeleeSkillBonusFactor : s->meleeSkillBonusFactor;
+	if (useSkill && isMelee && attacker) {
+		auto av = is1H ? RE::ActorValue::kOneHanded : RE::ActorValue::kTwoHanded;
+		chance += attacker->AsActorValueOwner()->GetActorValue(av) * sFactor;
+	}
+
+	return std::clamp(chance, 0.0f, 100.0f);
+}
+
+} // namespace HeadshotLogic

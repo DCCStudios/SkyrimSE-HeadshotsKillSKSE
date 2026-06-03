@@ -22,7 +22,7 @@ void PlayerHelmetTracker::OnHelmetKnockedOff(RE::ObjectRefHandle a_droppedRef, R
 	auto* settings = Settings::GetSingleton();
 
 	RE::DebugNotification("Your helmet was knocked off!");
-	PlayPlayerHelmetKnockoffSound();
+	PlayPlayerHelmetKnockoffSound(a_armorFormID);
 
 	if (settings->enableHelmetMapMarker) {
 		PlaceHelmetMarker();

@@ -11,6 +11,15 @@
 
 namespace Menu
 {
+	static void EnsureWindowSize()
+	{
+		static bool done = false;
+		if (!done) {
+			ImGui::SetWindowSize(ImVec2(620.0f, 720.0f), ImGuiCond_Once);
+			done = true;
+		}
+	}
+
 	void Register()
 	{
 		if (!SKSEMenuFramework::IsInstalled()) {
@@ -19,8 +28,7 @@ namespace Menu
 		}
 		SKSEMenuFramework::SetSection("Headshots Kill");
 		SKSEMenuFramework::AddSectionItem("General", RenderGeneral);
-		SKSEMenuFramework::AddSectionItem("Chances & Creatures", RenderChances);
-		SKSEMenuFramework::AddSectionItem("Races", RenderRaces);
+		SKSEMenuFramework::AddSectionItem("Races & Chances", RenderRaces);
 		SKSEMenuFramework::AddSectionItem("Helmet (NPC)", RenderHelmet);
 		SKSEMenuFramework::AddSectionItem("Helmet (Player)", RenderPlayerHelmet);
 		SKSEMenuFramework::AddSectionItem("Spells", RenderSpells);
@@ -33,6 +41,7 @@ namespace Menu
 	// =========================================================================
 	void __stdcall RenderGeneral()
 	{
+		EnsureWindowSize();
 		auto* s = Settings::GetSingleton();
 
 		ImGui::TextColored(ImVec4(0.7f, 0.85f, 1.0f, 1.0f), "General Settings");
@@ -130,100 +139,7 @@ namespace Menu
 	}
 
 	// =========================================================================
-	// Chances & Creatures
-	// =========================================================================
-	void __stdcall RenderChances()
-	{
-		auto* s = Settings::GetSingleton();
-
-		ImGui::TextColored(ImVec4(0.7f, 0.85f, 1.0f, 1.0f), "Headshot Chances by Creature Type");
-		ImGui::TextWrapped(
-			"Each creature category has its own chance (0-100%%) that a confirmed headshot results in "
-			"an instant kill. At 100%%, every headshot is lethal. At 0%%, that category is immune to OHKO. "
-			"The archery skill influence adds a bonus on top of the base chance for tougher creatures.");
-		ImGui::Spacing();
-		ImGui::TextDisabled("Formula: effective chance = base %% + (archery skill * skill weight)");
-		ImGui::Separator();
-
-		ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.6f, 1.0f), "Base Chances");
-		auto pctSlider = [s](const char* label, float* v, const char* tip) {
-			if (ImGui::SliderFloat(label, v, 0.0f, 100.0f, "%.1f%%")) {
-				*v = std::clamp(*v, 0.0f, 100.0f);
-				s->Save();
-			}
-			ImGui::SetItemTooltip("%s", tip);
-		};
-		pctSlider("Humanoid (NPC)", &s->chanceHumanoid,
-			"Chance for human/elf/beast race NPCs.\nThese are the most common targets.\nDefault: 100%%.");
-		pctSlider("Small animals", &s->chanceSmallAnimal,
-			"Wolves, skeevers, foxes, mudcrabs, small spiders, etc.\nDefault: 100%%.");
-		pctSlider("Giants", &s->chanceGiant,
-			"Giant race enemies. Lower values make giants harder to one-shot.\nDefault: 30%%.");
-		pctSlider("Trolls", &s->chanceTroll,
-			"All troll variants (frost troll, etc).\nDefault: 60%%.");
-		pctSlider("Bears", &s->chanceBear,
-			"All bear variants (cave bear, snow bear).\nDefault: 60%%.");
-		pctSlider("Mammoths", &s->chanceMammoth,
-			"Mammoths. Very tanky, so lower default chance.\nDefault: 20%%.");
-		pctSlider("Giant frostbite spiders", &s->chanceGiantSpider,
-			"Large frostbite spiders (scale >= threshold below).\nSmaller spiders use the 'small animals' chance.\nDefault: 50%%.");
-		pctSlider("Chaurus", &s->chanceChaurus,
-			"Chaurus and chaurus hunters.\nDefault: 50%%.");
-
-		ImGui::Separator();
-		ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.6f, 1.0f), "Spider Size Threshold");
-		float spTh = s->giantSpiderScaleThreshold;
-		if (ImGui::SliderFloat("Giant spider scale threshold", &spTh, 1.0f, 2.5f, "%.2f")) {
-			s->giantSpiderScaleThreshold = std::clamp(spTh, 1.0f, 3.0f);
-			s->Save();
-		}
-		ImGui::SetItemTooltip("FrostbiteSpiderRace actors with GetScale() at or above this\nuse the 'Giant frostbite spiders' chance. Below this uses 'Small animals'.\nDefault: 1.2.");
-
-		ImGui::Separator();
-		ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.6f, 1.0f), "Archery Skill Influence");
-		ImGui::TextWrapped(
-			"For tougher creatures, the shooter's Archery skill adds a bonus to the OHKO chance. "
-			"Set to 0 for a flat (skill-independent) chance.");
-		auto sk = [s](const char* label, float* v, const char* tip) {
-			if (ImGui::SliderFloat(label, v, 0.0f, 2.0f, "%.2f x skill")) {
-				*v = std::clamp(*v, 0.0f, 2.0f);
-				s->Save();
-			}
-			ImGui::SetItemTooltip("%s", tip);
-		};
-		sk("Giant##sk", &s->skillInfluenceGiant,
-			"Bonus per archery point added to Giant OHKO chance.\nAt skill 100 with weight 0.5: +50%% bonus.\nDefault: 0.5.");
-		sk("Troll##sk", &s->skillInfluenceTroll,
-			"Bonus per archery point added to Troll OHKO chance.\nDefault: 0.3.");
-		sk("Bear##sk", &s->skillInfluenceBear,
-			"Bonus per archery point added to Bear OHKO chance.\nDefault: 0.3.");
-		sk("Mammoth##sk", &s->skillInfluenceMammoth,
-			"Bonus per archery point added to Mammoth OHKO chance.\nDefault: 0.5.");
-		sk("Giant spider##sk", &s->skillInfluenceGiantSpider,
-			"Bonus per archery point for giant spiders.\n0 = flat chance (no skill scaling).\nDefault: 0.");
-		sk("Chaurus##sk", &s->skillInfluenceChaurus,
-			"Bonus per archery point for chaurus.\n0 = flat chance (no skill scaling).\nDefault: 0.");
-
-		ImGui::Separator();
-		ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Readout");
-		{
-			static float previewSkill = 80.0f;
-			ImGui::SliderFloat("Preview archery skill##chances", &previewSkill, 0.0f, 100.0f, "%.0f");
-			ImGui::SetItemTooltip("Drag to see how archery skill affects creature OHKO chances.");
-			auto calcChance = [&](float base, float weight) {
-				return std::clamp(base + previewSkill * weight, 0.0f, 100.0f);
-			};
-			ImGui::Text("  Giant: %.1f%%", calcChance(s->chanceGiant, s->skillInfluenceGiant));
-			ImGui::Text("  Troll: %.1f%%", calcChance(s->chanceTroll, s->skillInfluenceTroll));
-			ImGui::Text("  Bear: %.1f%%", calcChance(s->chanceBear, s->skillInfluenceBear));
-			ImGui::Text("  Mammoth: %.1f%%", calcChance(s->chanceMammoth, s->skillInfluenceMammoth));
-			ImGui::Text("  Giant spider: %.1f%%", calcChance(s->chanceGiantSpider, s->skillInfluenceGiantSpider));
-			ImGui::Text("  Chaurus: %.1f%%", calcChance(s->chanceChaurus, s->skillInfluenceChaurus));
-		}
-	}
-
-	// =========================================================================
-	// Races
+	// Races & Chances (consolidated)
 	// =========================================================================
 
 	static RaceConfigEntry* FindOrCreateUserOverride(Settings* s, const std::string& a_edid)
@@ -243,24 +159,108 @@ namespace Menu
 
 	void __stdcall RenderRaces()
 	{
+		EnsureWindowSize();
 		auto* s = Settings::GetSingleton();
 
-		ImGui::TextColored(ImVec4(0.7f, 0.85f, 1.0f, 1.0f), "Race Configuration");
+		ImGui::TextColored(ImVec4(0.7f, 0.85f, 1.0f, 1.0f), "Races & Chances");
 		ImGui::TextWrapped(
-			"Manage which races can be headshot and their OHKO chances. "
-			"Mod authors can add JSON files to Data/SKSE/Plugins/HeadshotsKill/Races/ to "
-			"register their custom races. All user edits here are saved separately to "
-			"HeadshotsKill_UserRaces.ini and never overwrite mod author files.");
+			"All headshot chance configuration lives here. The system works top-to-bottom:");
 		ImGui::Spacing();
-		ImGui::TextDisabled("Priority: User overrides > JSON entries > Legacy INI blocklist > Category defaults");
+		ImGui::BulletText("Category Defaults - base chance for each creature type (saved to main INI)");
+		ImGui::BulletText("Per-Race Overrides - override a specific race's chance (saved to user INI)");
+		ImGui::BulletText("Blacklist/Whitelist - block or allow specific races entirely");
+		ImGui::Spacing();
+		ImGui::TextDisabled("Priority: Per-race override > Category default. Blacklisted races are always immune.");
 		ImGui::Separator();
 
-		// --- Creature category chances (built-in races, editable) ---
-		ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.6f, 1.0f), "Creature Race Chances");
+		// =================================================================
+		// Section 1: Category Defaults
+		// =================================================================
+		ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.6f, 1.0f), "Category Defaults");
 		ImGui::TextWrapped(
-			"Set OHKO chance and skill weight per built-in creature race. "
-			"Editing here creates a user override saved to your personal config.");
+			"Fallback OHKO chances used when no per-race override exists. "
+			"Formula: effective %% = base + (archery skill * weight).");
 		ImGui::Spacing();
+
+		auto pctSlider = [s](const char* label, float* v, const char* tip) {
+			if (ImGui::SliderFloat(label, v, 0.0f, 100.0f, "%.1f%%")) {
+				*v = std::clamp(*v, 0.0f, 100.0f);
+				s->Save();
+			}
+			ImGui::SetItemTooltip("%s", tip);
+		};
+		pctSlider("Humanoid (NPC)", &s->chanceHumanoid,
+			"Chance for human/elf/beast race NPCs.\nDefault: 100%%.");
+		pctSlider("Small animals", &s->chanceSmallAnimal,
+			"Wolves, skeevers, foxes, mudcrabs, small spiders.\nDefault: 100%%.");
+		pctSlider("Giants", &s->chanceGiant,
+			"Giant race enemies.\nDefault: 15%%.");
+		pctSlider("Trolls", &s->chanceTroll,
+			"All troll variants.\nDefault: 20%%.");
+		pctSlider("Bears", &s->chanceBear,
+			"All bear variants.\nDefault: 10%%.");
+		pctSlider("Mammoths", &s->chanceMammoth,
+			"Mammoths.\nDefault: 8%%.");
+		pctSlider("Giant frostbite spiders", &s->chanceGiantSpider,
+			"Large frostbite spiders (scale >= threshold).\nDefault: 35%%.");
+		pctSlider("Chaurus", &s->chanceChaurus,
+			"Chaurus and chaurus hunters.\nDefault: 25%%.");
+
+		if (ImGui::TreeNode("Skill Weights & Spider Threshold")) {
+			ImGui::TextWrapped("Archery skill adds (skill * weight) on top of the base chance.");
+			auto sk = [s](const char* label, float* v, const char* tip) {
+				if (ImGui::SliderFloat(label, v, 0.0f, 2.0f, "%.2f")) {
+					*v = std::clamp(*v, 0.0f, 2.0f);
+					s->Save();
+				}
+				ImGui::SetItemTooltip("%s", tip);
+			};
+			sk("Giant##sk", &s->skillInfluenceGiant, "Default: 0.35");
+			sk("Troll##sk", &s->skillInfluenceTroll, "Default: 0.35");
+			sk("Bear##sk", &s->skillInfluenceBear, "Default: 0.50");
+			sk("Mammoth##sk", &s->skillInfluenceMammoth, "Default: 0.40");
+			sk("Giant spider##sk", &s->skillInfluenceGiantSpider, "Default: 0.0");
+			sk("Chaurus##sk", &s->skillInfluenceChaurus, "Default: 0.0");
+
+			ImGui::Spacing();
+			float spTh = s->giantSpiderScaleThreshold;
+			if (ImGui::SliderFloat("Giant spider scale threshold", &spTh, 1.0f, 2.5f, "%.2f")) {
+				s->giantSpiderScaleThreshold = std::clamp(spTh, 1.0f, 3.0f);
+				s->Save();
+			}
+			ImGui::SetItemTooltip("Spiders at or above this scale use 'Giant frostbite spiders' chance.\nBelow uses 'Small animals'.\nDefault: 1.15.");
+			ImGui::TreePop();
+		}
+
+		if (ImGui::TreeNode("Preview Effective Chances")) {
+			static float previewSkill = 80.0f;
+			ImGui::SliderFloat("Archery skill##preview", &previewSkill, 0.0f, 100.0f, "%.0f");
+			auto calc = [&](float base, float w) { return std::clamp(base + previewSkill * w, 0.0f, 100.0f); };
+			ImGui::Text("  Giant: %.1f%%", calc(s->chanceGiant, s->skillInfluenceGiant));
+			ImGui::Text("  Troll: %.1f%%", calc(s->chanceTroll, s->skillInfluenceTroll));
+			ImGui::Text("  Bear: %.1f%%", calc(s->chanceBear, s->skillInfluenceBear));
+			ImGui::Text("  Mammoth: %.1f%%", calc(s->chanceMammoth, s->skillInfluenceMammoth));
+			ImGui::Text("  Giant spider: %.1f%%", calc(s->chanceGiantSpider, s->skillInfluenceGiantSpider));
+			ImGui::Text("  Chaurus: %.1f%%", calc(s->chanceChaurus, s->skillInfluenceChaurus));
+			ImGui::TreePop();
+		}
+
+		ImGui::Separator();
+
+		// =================================================================
+		// Section 2: Per-Race Overrides
+		// =================================================================
+		ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.6f, 1.0f), "Per-Race Overrides");
+		ImGui::TextWrapped(
+			"Override chance/skill weight for specific races. These take priority over "
+			"the category defaults above. Saved to HeadshotsKill_UserRaces.ini.");
+		ImGui::Spacing();
+
+		static const char* kCategoryNames[] = {
+			"None (immune)", "Humanoid", "Small Animal", "Giant", "Troll",
+			"Bear", "Mammoth", "Giant Spider", "Chaurus"
+		};
+		static constexpr int kCategoryCount = 9;
 
 		struct BuiltinRace {
 			const char* edid;
@@ -281,6 +281,15 @@ namespace Menu
 			auto& br = builtins[bi];
 			ImGui::PushID(1000 + bi);
 
+			// Find existing user override (don't create yet)
+			RaceConfigEntry* ue = nullptr;
+			for (auto& e : s->userRaceConfig) {
+				if (_stricmp(e.raceEditorID.c_str(), br.edid) == 0) {
+					ue = &e;
+					break;
+				}
+			}
+
 			float effectiveChance = *br.baseChance;
 			float effectiveSkill = *br.baseSkill;
 			float userChance = s->GetRaceChanceOverride(br.edid);
@@ -290,33 +299,82 @@ namespace Menu
 			if (hasUserChance) effectiveChance = userChance;
 			if (hasUserSkill) effectiveSkill = userSkill;
 
+			int curCat = ue ? ue->categoryOverride : -1;
+			bool curUseCat = ue ? ue->useCategoryChance : true;
+
 			if (ImGui::TreeNode(br.label)) {
 				ImGui::Text("Category default: %.1f%% chance, %.2f skill weight",
 					*br.baseChance, *br.baseSkill);
 
-				float ch = effectiveChance;
-				if (ImGui::SliderFloat("Chance", &ch, 0.0f, 100.0f, "%.1f%%")) {
-					auto* ue = FindOrCreateUserOverride(s, br.edid);
-					ue->chanceOverride = ch;
+				int catIdx = curCat + 1;
+				char catLabel[64];
+				snprintf(catLabel, sizeof(catLabel), "Category##cat%d", bi);
+				const char* catPreview = (catIdx <= 0) ? "Auto-detect" : kCategoryNames[catIdx - 1];
+				if (ImGui::BeginCombo(catLabel, catPreview)) {
+					if (ImGui::Selectable("Auto-detect", catIdx == 0)) {
+						auto* u = FindOrCreateUserOverride(s, br.edid);
+						u->categoryOverride = -1;
+						s->SaveUserRaceConfig();
+					}
+					for (int ci = 0; ci < kCategoryCount; ++ci) {
+						if (ImGui::Selectable(kCategoryNames[ci], catIdx == ci + 1)) {
+							auto* u = FindOrCreateUserOverride(s, br.edid);
+							u->categoryOverride = ci;
+							s->SaveUserRaceConfig();
+						}
+					}
+					ImGui::EndCombo();
+				}
+				ImGui::SetItemTooltip("Override category for this race.\nAuto-detect uses keyword/name analysis.");
+
+				bool useCat = curUseCat;
+				if (ImGui::Checkbox("Use category headshot chance", &useCat)) {
+					auto* u = FindOrCreateUserOverride(s, br.edid);
+					u->useCategoryChance = useCat;
+					if (useCat) {
+						u->chanceOverride = -1.0f;
+						u->skillWeight = -1.0f;
+					}
 					s->SaveUserRaceConfig();
 				}
-				ImGui::SetItemTooltip("OHKO chance for %s.\nEdits are saved as a user override.", br.label);
+				ImGui::SetItemTooltip("When enabled, uses the category's default chance and skill weight.\nDisable to set individual values.");
 
-				float sw = effectiveSkill;
-				if (ImGui::SliderFloat("Skill weight", &sw, 0.0f, 2.0f, "%.2f")) {
-					auto* ue = FindOrCreateUserOverride(s, br.edid);
-					ue->skillWeight = sw;
-					s->SaveUserRaceConfig();
+				if (!curUseCat) {
+					float ch = effectiveChance;
+					if (ImGui::SliderFloat("Chance", &ch, 0.0f, 100.0f, "%.1f%%")) {
+						auto* u = FindOrCreateUserOverride(s, br.edid);
+						u->chanceOverride = ch;
+						u->useCategoryChance = false;
+						s->SaveUserRaceConfig();
+					}
+					ImGui::SetItemTooltip("OHKO chance for %s.\nEdits are saved as a user override.", br.label);
+
+					float sw = effectiveSkill;
+					if (ImGui::SliderFloat("Skill weight", &sw, 0.0f, 2.0f, "%.2f")) {
+						auto* u = FindOrCreateUserOverride(s, br.edid);
+						u->skillWeight = sw;
+						u->useCategoryChance = false;
+						s->SaveUserRaceConfig();
+					}
+					ImGui::SetItemTooltip("Archery skill scaling weight for %s.", br.label);
+				} else {
+					ImGui::BeginDisabled();
+					float ch = *br.baseChance;
+					ImGui::SliderFloat("Chance", &ch, 0.0f, 100.0f, "%.1f%%");
+					float sw = *br.baseSkill;
+					ImGui::SliderFloat("Skill weight", &sw, 0.0f, 2.0f, "%.2f");
+					ImGui::EndDisabled();
 				}
-				ImGui::SetItemTooltip("Archery skill scaling weight for %s.", br.label);
 
-				if (hasUserChance || hasUserSkill) {
+				if (hasUserChance || hasUserSkill || curCat >= 0 || !curUseCat) {
 					if (ImGui::SmallButton("Reset to category default")) {
 						for (auto it = s->userRaceConfig.begin(); it != s->userRaceConfig.end(); ++it) {
 							if (_stricmp(it->raceEditorID.c_str(), br.edid) == 0) {
 								it->chanceOverride = -1.0f;
 								it->skillWeight = -1.0f;
-								if (it->blocked == false && it->chanceOverride < 0.0f && it->skillWeight < 0.0f) {
+								it->categoryOverride = -1;
+								it->useCategoryChance = true;
+								if (it->blocked == false && it->chanceOverride < 0.0f && it->skillWeight < 0.0f && it->categoryOverride < 0) {
 									s->userRaceConfig.erase(it);
 								}
 								break;
@@ -332,51 +390,92 @@ namespace Menu
 
 		ImGui::Separator();
 
+		// =================================================================
+		// Section 3: Blacklists & Whitelists
+		// =================================================================
+		ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.6f, 1.0f), "Blacklist / Whitelist");
+		ImGui::TextWrapped(
+			"Races can be blocked (immune to headshot) or explicitly allowed. "
+			"Sources include mod author JSON files, legacy INI, and your own user entries.");
+		ImGui::Spacing();
+
 		// --- JSON (mod author) entries with editable chance overrides ---
 		if (!s->raceConfig.empty()) {
-			ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.6f, 1.0f), "From JSON (mod author)");
-			ImGui::TextWrapped("Block/allow status comes from the JSON file. "
-				"You can override chances here (saved to your user config).");
+			if (ImGui::TreeNode("From JSON (mod author)")) {
+				ImGui::TextDisabled("Block/allow status comes from the JSON file. "
+					"You can override chances here (saved to your user config).");
 
-			for (int ji = 0; ji < static_cast<int>(s->raceConfig.size()); ++ji) {
-				const auto& entry = s->raceConfig[ji];
-				ImGui::PushID(2000 + ji);
+				for (int ji = 0; ji < static_cast<int>(s->raceConfig.size()); ++ji) {
+					const auto& entry = s->raceConfig[ji];
+					ImGui::PushID(2000 + ji);
 
-				const char* tag = entry.blocked ? "[BLOCK]" : "[ALLOW]";
-				if (ImGui::TreeNode("", "%s %s (%s)", tag, entry.raceEditorID.c_str(), entry.source.c_str())) {
-					if (!entry.comment.empty()) {
-						ImGui::TextDisabled("%s", entry.comment.c_str());
+					const char* tag = entry.blocked ? "[BLOCK]" : "[ALLOW]";
+					if (ImGui::TreeNode("", "%s %s (%s)", tag, entry.raceEditorID.c_str(), entry.source.c_str())) {
+						if (!entry.comment.empty()) {
+							ImGui::TextDisabled("%s", entry.comment.c_str());
+						}
+
+						int jsonCat = entry.categoryOverride;
+						bool jsonUseCat = entry.useCategoryChance;
+						ImGui::Text("JSON category: %s | Use category chance: %s",
+							(jsonCat < 0) ? "Auto-detect" : kCategoryNames[jsonCat],
+							jsonUseCat ? "Yes" : "No");
+
+						float jsonChance = entry.chanceOverride;
+						float userChance = s->GetRaceChanceOverride(entry.raceEditorID);
+						float effective = (userChance >= 0.0f) ? userChance : ((jsonChance >= 0.0f) ? jsonChance : 100.0f);
+
+						int catIdx = jsonCat + 1;
+						char catLabel[64];
+						snprintf(catLabel, sizeof(catLabel), "Category##jcat%d", ji);
+						const char* catPreview = (catIdx <= 0) ? "Auto-detect" : kCategoryNames[catIdx - 1];
+						if (ImGui::BeginCombo(catLabel, catPreview)) {
+							if (ImGui::Selectable("Auto-detect", catIdx == 0)) {
+								auto* ue = FindOrCreateUserOverride(s, entry.raceEditorID);
+								ue->categoryOverride = -1;
+								ue->blocked = entry.blocked;
+								s->SaveUserRaceConfig();
+							}
+							for (int ci = 0; ci < kCategoryCount; ++ci) {
+								if (ImGui::Selectable(kCategoryNames[ci], catIdx == ci + 1)) {
+									auto* ue = FindOrCreateUserOverride(s, entry.raceEditorID);
+									ue->categoryOverride = ci;
+									ue->blocked = entry.blocked;
+									s->SaveUserRaceConfig();
+								}
+							}
+							ImGui::EndCombo();
+						}
+						ImGui::SetItemTooltip("Override category. JSON default: %s",
+							(jsonCat < 0) ? "Auto-detect" : kCategoryNames[jsonCat]);
+
+						float ch = effective;
+						if (ImGui::SliderFloat("Chance", &ch, 0.0f, 100.0f, "%.1f%%")) {
+							auto* ue = FindOrCreateUserOverride(s, entry.raceEditorID);
+							ue->chanceOverride = ch;
+							ue->blocked = entry.blocked;
+							s->SaveUserRaceConfig();
+						}
+						ImGui::SetItemTooltip("OHKO chance override for this race.\nJSON default: %.1f%%",
+							jsonChance >= 0.0f ? jsonChance : 100.0f);
+
+						float jsonSkill = entry.skillWeight;
+						float userSkill = s->GetRaceSkillWeightOverride(entry.raceEditorID);
+						float effSkill = (userSkill >= 0.0f) ? userSkill : ((jsonSkill >= 0.0f) ? jsonSkill : 0.0f);
+
+						float sw = effSkill;
+						if (ImGui::SliderFloat("Skill weight", &sw, 0.0f, 2.0f, "%.2f")) {
+							auto* ue = FindOrCreateUserOverride(s, entry.raceEditorID);
+							ue->skillWeight = sw;
+							ue->blocked = entry.blocked;
+							s->SaveUserRaceConfig();
+						}
+
+						ImGui::TreePop();
 					}
-
-					float jsonChance = entry.chanceOverride;
-					float userChance = s->GetRaceChanceOverride(entry.raceEditorID);
-					float effective = (userChance >= 0.0f) ? userChance : ((jsonChance >= 0.0f) ? jsonChance : 100.0f);
-
-					float ch = effective;
-					if (ImGui::SliderFloat("Chance", &ch, 0.0f, 100.0f, "%.1f%%")) {
-						auto* ue = FindOrCreateUserOverride(s, entry.raceEditorID);
-						ue->chanceOverride = ch;
-						ue->blocked = entry.blocked;
-						s->SaveUserRaceConfig();
-					}
-					ImGui::SetItemTooltip("OHKO chance override for this race.\nJSON default: %.1f%%",
-						jsonChance >= 0.0f ? jsonChance : 100.0f);
-
-					float jsonSkill = entry.skillWeight;
-					float userSkill = s->GetRaceSkillWeightOverride(entry.raceEditorID);
-					float effSkill = (userSkill >= 0.0f) ? userSkill : ((jsonSkill >= 0.0f) ? jsonSkill : 0.0f);
-
-					float sw = effSkill;
-					if (ImGui::SliderFloat("Skill weight", &sw, 0.0f, 2.0f, "%.2f")) {
-						auto* ue = FindOrCreateUserOverride(s, entry.raceEditorID);
-						ue->skillWeight = sw;
-						ue->blocked = entry.blocked;
-						s->SaveUserRaceConfig();
-					}
-
-					ImGui::TreePop();
+					ImGui::PopID();
 				}
-				ImGui::PopID();
+				ImGui::TreePop();
 			}
 			ImGui::Separator();
 		}
@@ -422,19 +521,64 @@ namespace Menu
 			ImGui::SetItemTooltip("Remove this entry.");
 
 			if (!entry.blocked) {
-				float ch = entry.chanceOverride >= 0.0f ? entry.chanceOverride : 100.0f;
-				char chLabel[64];
-				snprintf(chLabel, sizeof(chLabel), "Chance##u%d", i);
-				if (ImGui::SliderFloat(chLabel, &ch, 0.0f, 100.0f, "%.1f%%")) {
-					entry.chanceOverride = ch;
+				int catIdx = entry.categoryOverride + 1;
+				char catLabel[64];
+				snprintf(catLabel, sizeof(catLabel), "Category##ucat%d", i);
+				const char* catPreview = (catIdx <= 0) ? "Auto-detect" : kCategoryNames[catIdx - 1];
+				if (ImGui::BeginCombo(catLabel, catPreview)) {
+					if (ImGui::Selectable("Auto-detect", catIdx == 0)) {
+						entry.categoryOverride = -1;
+						s->SaveUserRaceConfig();
+					}
+					for (int ci = 0; ci < kCategoryCount; ++ci) {
+						if (ImGui::Selectable(kCategoryNames[ci], catIdx == ci + 1)) {
+							entry.categoryOverride = ci;
+							s->SaveUserRaceConfig();
+						}
+					}
+					ImGui::EndCombo();
+				}
+				ImGui::SetItemTooltip("Override category for this race.\nAuto-detect uses keyword/name analysis.");
+
+				bool useCat = entry.useCategoryChance;
+				char useCatLabel[64];
+				snprintf(useCatLabel, sizeof(useCatLabel), "Use category chance##uusec%d", i);
+				if (ImGui::Checkbox(useCatLabel, &useCat)) {
+					entry.useCategoryChance = useCat;
+					if (useCat) {
+						entry.chanceOverride = -1.0f;
+						entry.skillWeight = -1.0f;
+					}
 					s->SaveUserRaceConfig();
 				}
-				float sw = entry.skillWeight >= 0.0f ? entry.skillWeight : 0.0f;
-				char swLabel[64];
-				snprintf(swLabel, sizeof(swLabel), "Skill weight##u%d", i);
-				if (ImGui::SliderFloat(swLabel, &sw, 0.0f, 2.0f, "%.2f")) {
-					entry.skillWeight = sw;
-					s->SaveUserRaceConfig();
+				ImGui::SetItemTooltip("When enabled, uses the category's default chance.\nDisable to set individual values.");
+
+				if (!useCat) {
+					float ch = entry.chanceOverride >= 0.0f ? entry.chanceOverride : 100.0f;
+					char chLabel[64];
+					snprintf(chLabel, sizeof(chLabel), "Chance##u%d", i);
+					if (ImGui::SliderFloat(chLabel, &ch, 0.0f, 100.0f, "%.1f%%")) {
+						entry.chanceOverride = ch;
+						s->SaveUserRaceConfig();
+					}
+					float sw = entry.skillWeight >= 0.0f ? entry.skillWeight : 0.0f;
+					char swLabel[64];
+					snprintf(swLabel, sizeof(swLabel), "Skill weight##u%d", i);
+					if (ImGui::SliderFloat(swLabel, &sw, 0.0f, 2.0f, "%.2f")) {
+						entry.skillWeight = sw;
+						s->SaveUserRaceConfig();
+					}
+				} else {
+					ImGui::BeginDisabled();
+					float ch = 0.0f;
+					char chLabel[64];
+					snprintf(chLabel, sizeof(chLabel), "Chance##u%d", i);
+					ImGui::SliderFloat(chLabel, &ch, 0.0f, 100.0f, "%.1f%%");
+					float sw = 0.0f;
+					char swLabel[64];
+					snprintf(swLabel, sizeof(swLabel), "Skill weight##u%d", i);
+					ImGui::SliderFloat(swLabel, &sw, 0.0f, 2.0f, "%.2f");
+					ImGui::EndDisabled();
 				}
 			}
 
@@ -469,13 +613,27 @@ namespace Menu
 
 		if (ImGui::Button("Add Race##addbtn")) {
 			if (newRaceBuf[0]) {
-				RaceConfigEntry entry;
-				entry.raceEditorID = newRaceBuf;
-				entry.source = "User";
-				entry.blocked = newRaceBlocked;
-				entry.chanceOverride = newRaceBlocked ? -1.0f : newRaceChance;
-				entry.skillWeight = newRaceBlocked ? -1.0f : newRaceSkill;
-				s->userRaceConfig.push_back(std::move(entry));
+				// Update existing entry if race already present, otherwise add new
+				RaceConfigEntry* existing = nullptr;
+				for (auto& e : s->userRaceConfig) {
+					if (_stricmp(e.raceEditorID.c_str(), newRaceBuf) == 0) {
+						existing = &e;
+						break;
+					}
+				}
+				if (existing) {
+					existing->blocked = newRaceBlocked;
+					existing->chanceOverride = newRaceBlocked ? -1.0f : newRaceChance;
+					existing->skillWeight = newRaceBlocked ? -1.0f : newRaceSkill;
+				} else {
+					RaceConfigEntry entry;
+					entry.raceEditorID = newRaceBuf;
+					entry.source = "User";
+					entry.blocked = newRaceBlocked;
+					entry.chanceOverride = newRaceBlocked ? -1.0f : newRaceChance;
+					entry.skillWeight = newRaceBlocked ? -1.0f : newRaceSkill;
+					s->userRaceConfig.push_back(std::move(entry));
+				}
 				s->SaveUserRaceConfig();
 				newRaceBuf[0] = '\0';
 				newRaceBlocked = true;
@@ -502,6 +660,7 @@ namespace Menu
 	// =========================================================================
 	void __stdcall RenderHelmet()
 	{
+		EnsureWindowSize();
 		auto* s = Settings::GetSingleton();
 
 		ImGui::TextColored(ImVec4(0.7f, 0.85f, 1.0f, 1.0f), "NPC Helmet System");
@@ -536,9 +695,13 @@ namespace Menu
 
 		ImGui::Separator();
 		ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.6f, 1.0f), "Melee Helmet Knockoff");
-		ImGui::TextDisabled("Melee weapon hits to the head can also knock helmets off (no OHKO).");
+		if (HeadshotLogic::IsPrecisionActive()) {
+			ImGui::TextDisabled("Precision detected: melee hits use accurate body part detection for the head.");
+		} else {
+			ImGui::TextDisabled("Melee weapon hits have a flat chance to knock helmets off (no body part detection without Precision).");
+		}
 		if (ImGui::Checkbox("Enable melee helmet knockoff##npc", &s->enableMeleeHelmetKnockoff)) s->Save();
-		ImGui::SetItemTooltip("When on, melee hits to the head have a chance to knock off NPC helmets.\nThis only removes the helmet -- it does NOT apply headshot OHKO damage.");
+		ImGui::SetItemTooltip("When on, melee hits to the head have a chance to knock off NPC helmets.\nThis only removes the helmet -- it does NOT apply headshot OHKO damage.\n\nWith Precision installed: uses actual hit position for head detection.\nWithout Precision: uses a flat %% chance per swing.");
 
 		ImGui::BeginDisabled(!s->enableMeleeHelmetKnockoff);
 		if (ImGui::SliderFloat("1H knockoff chance##npc", &s->meleeKnockoffChance1H, 0.0f, 100.0f, "%.0f%%")) {
@@ -552,6 +715,35 @@ namespace Menu
 			s->Save();
 		}
 		ImGui::SetItemTooltip("Chance for two-handed weapons (greatsword, battleaxe/warhammer)\nto knock off the helmet on a head hit.\nDefault: 20%%.");
+		ImGui::EndDisabled();
+
+		ImGui::Separator();
+		ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.6f, 1.0f), "Knockoff Scaling");
+		ImGui::TextWrapped(
+			"Adjusts the effective knockoff chance based on the helmet's weight and the "
+			"attacker's melee skill. Formula: effective = base - (weight * penalty) + (skill * factor).");
+		ImGui::Spacing();
+
+		if (ImGui::Checkbox("Scale by helmet weight##npc", &s->enableWeightScaling)) s->Save();
+		ImGui::SetItemTooltip("Heavier helmets are harder to knock off.\nLeather (~2 wt) = -6%%, Steel (~6 wt) = -18%%, Daedric (~12 wt) = -36%%.\nDefault: ON.");
+
+		ImGui::BeginDisabled(!s->enableWeightScaling);
+		if (ImGui::SliderFloat("Weight penalty per unit##npc", &s->weightPenaltyPerUnit, 0.0f, 10.0f, "%.1f")) {
+			s->weightPenaltyPerUnit = std::clamp(s->weightPenaltyPerUnit, 0.0f, 10.0f);
+			s->Save();
+		}
+		ImGui::SetItemTooltip("Each unit of helmet weight reduces knockoff chance by this amount.\nExample: weight=6, penalty=3 -> -18%% chance.\nDefault: 3.0.");
+		ImGui::EndDisabled();
+
+		if (ImGui::Checkbox("Scale by attacker skill (melee only)##npc", &s->enableMeleeSkillScaling)) s->Save();
+		ImGui::SetItemTooltip("Higher 1H/2H skill increases knockoff chance on melee hits.\nDoes NOT apply to projectile knockoffs.\nDefault: ON.");
+
+		ImGui::BeginDisabled(!s->enableMeleeSkillScaling);
+		if (ImGui::SliderFloat("Skill bonus factor##npc", &s->meleeSkillBonusFactor, 0.0f, 1.0f, "%.2f")) {
+			s->meleeSkillBonusFactor = std::clamp(s->meleeSkillBonusFactor, 0.0f, 1.0f);
+			s->Save();
+		}
+		ImGui::SetItemTooltip("Each point of 1H or 2H skill adds (skill * factor) to knockoff chance.\nExample: skill=80, factor=0.2 -> +16%% chance.\nDefault: 0.2.");
 		ImGui::EndDisabled();
 
 		ImGui::Separator();
@@ -632,6 +824,7 @@ namespace Menu
 	// =========================================================================
 	void __stdcall RenderPlayerHelmet()
 	{
+		EnsureWindowSize();
 		auto* s = Settings::GetSingleton();
 
 		ImGui::TextColored(ImVec4(0.7f, 0.85f, 1.0f, 1.0f), "Player Helmet Knock-off System");
@@ -685,9 +878,13 @@ namespace Menu
 
 		ImGui::Separator();
 		ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.6f, 1.0f), "Melee Helmet Knockoff");
-		ImGui::TextDisabled("Enemy melee hits to the head can also knock your helmet off.");
+		if (HeadshotLogic::IsPrecisionActive()) {
+			ImGui::TextDisabled("Precision detected: enemy melee hits use accurate head detection.");
+		} else {
+			ImGui::TextDisabled("Enemy melee hits have a flat chance to knock your helmet off (no body part detection without Precision).");
+		}
 		if (ImGui::Checkbox("Enable melee helmet knockoff##player", &s->enablePlayerMeleeHelmetKnockoff)) s->Save();
-		ImGui::SetItemTooltip("When on, NPC melee attacks that hit your head have a chance to knock off your helmet.\nThe same tracking/recovery system applies afterward.");
+		ImGui::SetItemTooltip("When on, NPC melee attacks that hit your head have a chance to knock off your helmet.\nThe same tracking/recovery system applies afterward.\n\nWith Precision installed: uses actual hit position for head detection.\nWithout Precision: uses a flat %% chance per swing.");
 
 		ImGui::BeginDisabled(!s->enablePlayerMeleeHelmetKnockoff);
 		if (ImGui::SliderFloat("1H knockoff chance##playermelee", &s->playerMeleeKnockoffChance1H, 0.0f, 100.0f, "%.0f%%")) {
@@ -701,6 +898,35 @@ namespace Menu
 			s->Save();
 		}
 		ImGui::SetItemTooltip("Chance for enemy two-handed weapons to knock your helmet off.\nDefault: 20%%.");
+		ImGui::EndDisabled();
+
+		ImGui::Separator();
+		ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.6f, 1.0f), "Knockoff Scaling");
+		ImGui::TextWrapped(
+			"Adjusts the effective knockoff chance based on helmet weight and attacker skill. "
+			"Formula: effective = base - (weight * penalty) + (skill * factor).");
+		ImGui::Spacing();
+
+		if (ImGui::Checkbox("Scale by helmet weight##player", &s->enablePlayerWeightScaling)) s->Save();
+		ImGui::SetItemTooltip("Heavier helmets are harder to knock off.\nLeather (~2 wt) = -6%%, Steel (~6 wt) = -18%%, Daedric (~12 wt) = -36%%.\nDefault: ON.");
+
+		ImGui::BeginDisabled(!s->enablePlayerWeightScaling);
+		if (ImGui::SliderFloat("Weight penalty per unit##player", &s->playerWeightPenaltyPerUnit, 0.0f, 10.0f, "%.1f")) {
+			s->playerWeightPenaltyPerUnit = std::clamp(s->playerWeightPenaltyPerUnit, 0.0f, 10.0f);
+			s->Save();
+		}
+		ImGui::SetItemTooltip("Each unit of helmet weight reduces knockoff chance by this amount.\nExample: weight=6, penalty=3 -> -18%% chance.\nDefault: 3.0.");
+		ImGui::EndDisabled();
+
+		if (ImGui::Checkbox("Scale by attacker skill (melee only)##player", &s->enablePlayerMeleeSkillScaling)) s->Save();
+		ImGui::SetItemTooltip("Higher attacker 1H/2H skill increases knockoff chance on melee hits.\nDoes NOT apply to projectile knockoffs.\nDefault: ON.");
+
+		ImGui::BeginDisabled(!s->enablePlayerMeleeSkillScaling);
+		if (ImGui::SliderFloat("Skill bonus factor##player", &s->playerMeleeSkillBonusFactor, 0.0f, 1.0f, "%.2f")) {
+			s->playerMeleeSkillBonusFactor = std::clamp(s->playerMeleeSkillBonusFactor, 0.0f, 1.0f);
+			s->Save();
+		}
+		ImGui::SetItemTooltip("Each point of the attacker's 1H or 2H skill adds (skill * factor) to knockoff chance.\nExample: enemy skill=80, factor=0.2 -> +16%% chance.\nDefault: 0.2.");
 		ImGui::EndDisabled();
 
 		ImGui::Separator();
@@ -735,9 +961,16 @@ namespace Menu
 
 		ImGui::Separator();
 		ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.6f, 1.0f), "Knockoff Sound");
-		if (ImGui::InputText("WAV File##playerKnockoff", s->playerHelmetKnockoffSoundFile,
-			sizeof(s->playerHelmetKnockoffSoundFile))) s->Save();
-		ImGui::SetItemTooltip("Custom WAV played when your helmet is knocked off.\nPlace the file in: Data/SKSE/Plugins/HeadshotsKill/\nLeave empty for no sound.\nDefault: helmetKnockoff.wav.");
+		if (ImGui::Checkbox("Enable knockoff sound", &s->enablePlayerHelmetKnockoffSound)) s->Save();
+		ImGui::SetItemTooltip("Plays a sound when your helmet is knocked off.\nAutomatically selects metal or non-metal sound based on helmet material.\nRandomly picks from available variants (helmetknockoff.wav, helmetknockoff_1.wav, etc.).\nPlace files in: Data/SKSE/Plugins/HeadshotsKill/");
+
+		ImGui::BeginDisabled(!s->enablePlayerHelmetKnockoffSound);
+		if (ImGui::SliderFloat("Knockoff sound volume", &s->playerHelmetKnockoffSoundVolume, 0.0f, 1.0f, "%.2f")) {
+			s->playerHelmetKnockoffSoundVolume = std::clamp(s->playerHelmetKnockoffSoundVolume, 0.0f, 1.0f);
+			s->Save();
+		}
+		ImGui::SetItemTooltip("Volume of the helmet knockoff sound.\n0 = silent, 1 = full volume.\nDefault: 0.8.");
+		ImGui::EndDisabled();
 
 		ImGui::EndDisabled();
 
@@ -770,6 +1003,7 @@ namespace Menu
 	// =========================================================================
 	void __stdcall RenderSpells()
 	{
+		EnsureWindowSize();
 		auto* s = Settings::GetSingleton();
 
 		ImGui::TextColored(ImVec4(0.7f, 0.85f, 1.0f, 1.0f), "Spell Allowlist");
@@ -961,6 +1195,7 @@ namespace Menu
 	// =========================================================================
 	void __stdcall RenderDebug()
 	{
+		EnsureWindowSize();
 		auto* s = Settings::GetSingleton();
 
 		ImGui::TextColored(ImVec4(0.7f, 0.85f, 1.0f, 1.0f), "Debug & Testing");
@@ -969,6 +1204,17 @@ namespace Menu
 			"Enable debug logging to see detailed per-hit information in the SKSE log.");
 		ImGui::Separator();
 
+		ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.6f, 1.0f), "Integrations");
+		if (HeadshotLogic::IsPrecisionActive()) {
+			ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Precision: Active");
+			ImGui::SetItemTooltip("Precision mod detected. Melee helmet knockoffs use accurate hit position for head detection.");
+		} else {
+			ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.4f, 1.0f), "Precision: Not detected (flat-chance fallback)");
+			ImGui::SetItemTooltip("Precision mod not installed. Melee helmet knockoffs use a flat % chance (no body part detection).\n"
+				"Install Precision for accurate melee head-hit detection.");
+		}
+
+		ImGui::Separator();
 		ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.6f, 1.0f), "Logging");
 		if (ImGui::Checkbox("Debug logging##debug", &s->enableDebugLogging)) s->Save();
 		ImGui::SetItemTooltip("Writes per-impact details to the SKSE log file:\n"

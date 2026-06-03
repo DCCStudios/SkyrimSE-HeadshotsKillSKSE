@@ -18,8 +18,10 @@ struct RaceConfigEntry
 	std::string raceEditorID;
 	std::string source;        // "User" or filename.json
 	bool        blocked{ true };  // true=blacklisted, false=whitelisted (allowed)
-	float       chanceOverride{ -1.0f };  // -1 = use category default
-	float       skillWeight{ -1.0f };     // -1 = use category default
+	bool        useCategoryChance{ true };  // when true, use category defaults for chance/skill
+	int         categoryOverride{ -1 };     // -1=auto-detect, 0=None, 1=Humanoid, 2=SmallAnimal, 3=Giant, 4=Troll, 5=Bear, 6=Mammoth, 7=SpiderGiant, 8=Chaurus
+	float       chanceOverride{ -1.0f };    // only used when useCategoryChance=false
+	float       skillWeight{ -1.0f };       // only used when useCategoryChance=false
 	std::string comment;
 };
 
@@ -79,6 +81,12 @@ public:
 	float meleeKnockoffChance1H{ 10.0f };
 	float meleeKnockoffChance2H{ 20.0f };
 
+	// --- NPC Helmet knockoff weight/skill scaling ---
+	bool  enableWeightScaling{ true };
+	float weightPenaltyPerUnit{ 3.0f };
+	bool  enableMeleeSkillScaling{ true };
+	float meleeSkillBonusFactor{ 0.2f };
+
 	// --- Full draw requirement ---
 	bool requireFullDraw{ true };
 	float fullDrawThreshold{ 0.75f };
@@ -126,6 +134,13 @@ public:
 	bool enablePlayerMeleeHelmetKnockoff{ false };
 	float playerMeleeKnockoffChance1H{ 10.0f };
 	float playerMeleeKnockoffChance2H{ 20.0f };
+
+	// --- Player Helmet knockoff weight/skill scaling ---
+	bool  enablePlayerWeightScaling{ true };
+	float playerWeightPenaltyPerUnit{ 3.0f };
+	bool  enablePlayerMeleeSkillScaling{ true };
+	float playerMeleeSkillBonusFactor{ 0.2f };
+
 	bool returnHelmetOnLoad{ true };
 	float helmetTrackingDurationMinutes{ 5.0f };
 	bool enableHelmetHighlight{ true };
@@ -134,7 +149,9 @@ public:
 	float highlightB{ 1.0f };
 	float highlightAlpha{ 0.6f };
 	bool enableHelmetMapMarker{ true };
-	char playerHelmetKnockoffSoundFile[kMaxSoundFileChars]{};
+	bool enablePlayerHelmetKnockoffSound{ true };
+	float playerHelmetKnockoffSoundVolume{ 0.8f };
+	char playerHelmetKnockoffSoundFile[kMaxSoundFileChars]{}; // legacy, kept for INI compat
 
 	// --- Lists ---
 	static constexpr std::size_t kMaxIniListChars = 8192;

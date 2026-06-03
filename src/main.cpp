@@ -20,8 +20,8 @@ namespace
 		*path /= (std::string{ Plugin::NAME } + ".log");
 		auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path->string(), true);
 		auto log = std::make_shared<spdlog::logger>("global log"s, std::move(sink));
-		log->set_level(spdlog::level::info);
-		log->flush_on(spdlog::level::info);
+		log->set_level(spdlog::level::debug);
+		log->flush_on(spdlog::level::debug);
 		spdlog::set_default_logger(std::move(log));
 		spdlog::set_pattern("[%H:%M:%S] [%l] %v"s);
 	}
@@ -41,6 +41,9 @@ namespace
 		Hooks::Install();
 		Menu::Register();
 		PlayerHelmetTracker::GetSingleton()->RegisterEventSink();
+		if (!HeadshotLogic::TryRegisterPrecision(SKSE::GetPluginHandle())) {
+			HeadshotLogic::RegisterMeleeHitSink();
+		}
 		logger::info("{} initialized", Plugin::NAME);
 		break;
 	case SKSE::MessagingInterface::kPostLoadGame:

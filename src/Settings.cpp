@@ -108,6 +108,10 @@ void Settings::ResetToDefaults()
 	enableMeleeHelmetKnockoff = false;
 	meleeKnockoffChance1H = 10.0f;
 	meleeKnockoffChance2H = 20.0f;
+	enableWeightScaling = true;
+	weightPenaltyPerUnit = 3.0f;
+	enableMeleeSkillScaling = true;
+	meleeSkillBonusFactor = 0.2f;
 
 	requireFullDraw = true;
 	fullDrawThreshold = 0.75f;
@@ -139,6 +143,10 @@ void Settings::ResetToDefaults()
 	enablePlayerMeleeHelmetKnockoff = false;
 	playerMeleeKnockoffChance1H = 10.0f;
 	playerMeleeKnockoffChance2H = 20.0f;
+	enablePlayerWeightScaling = true;
+	playerWeightPenaltyPerUnit = 3.0f;
+	enablePlayerMeleeSkillScaling = true;
+	playerMeleeSkillBonusFactor = 0.2f;
 	returnHelmetOnLoad = true;
 	helmetTrackingDurationMinutes = 5.0f;
 	enableHelmetHighlight = true;
@@ -147,6 +155,8 @@ void Settings::ResetToDefaults()
 	highlightB = 1.0f;
 	highlightAlpha = 0.6f;
 	enableHelmetMapMarker = true;
+	enablePlayerHelmetKnockoffSound = true;
+	playerHelmetKnockoffSoundVolume = 0.8f;
 	strncpy_s(playerHelmetKnockoffSoundFile, "helmetKnockoff.wav", sizeof(playerHelmetKnockoffSoundFile) - 1);
 	playerHelmetKnockoffSoundFile[sizeof(playerHelmetKnockoffSoundFile) - 1] = '\0';
 
@@ -210,6 +220,10 @@ void Settings::Load()
 	enableMeleeHelmetKnockoff = ini.GetBoolValue("Helmet", "bEnableMeleeKnockoff", false);
 	meleeKnockoffChance1H = static_cast<float>(ini.GetDoubleValue("Helmet", "fMeleeKnockoffChance1H", 10.0));
 	meleeKnockoffChance2H = static_cast<float>(ini.GetDoubleValue("Helmet", "fMeleeKnockoffChance2H", 20.0));
+	enableWeightScaling = ini.GetBoolValue("Helmet", "bEnableWeightScaling", true);
+	weightPenaltyPerUnit = static_cast<float>(ini.GetDoubleValue("Helmet", "fWeightPenaltyPerUnit", 3.0));
+	enableMeleeSkillScaling = ini.GetBoolValue("Helmet", "bEnableMeleeSkillScaling", true);
+	meleeSkillBonusFactor = static_cast<float>(ini.GetDoubleValue("Helmet", "fMeleeSkillBonusFactor", 0.2));
 
 	{
 		const char* perkStr = ini.GetValue("Helmet", "sHelmetBypassPerk", "");
@@ -249,6 +263,10 @@ void Settings::Load()
 	enablePlayerMeleeHelmetKnockoff = ini.GetBoolValue("PlayerHelmet", "bEnableMeleeKnockoff", false);
 	playerMeleeKnockoffChance1H = static_cast<float>(ini.GetDoubleValue("PlayerHelmet", "fMeleeKnockoffChance1H", 10.0));
 	playerMeleeKnockoffChance2H = static_cast<float>(ini.GetDoubleValue("PlayerHelmet", "fMeleeKnockoffChance2H", 20.0));
+	enablePlayerWeightScaling = ini.GetBoolValue("PlayerHelmet", "bEnableWeightScaling", true);
+	playerWeightPenaltyPerUnit = static_cast<float>(ini.GetDoubleValue("PlayerHelmet", "fWeightPenaltyPerUnit", 3.0));
+	enablePlayerMeleeSkillScaling = ini.GetBoolValue("PlayerHelmet", "bEnableMeleeSkillScaling", true);
+	playerMeleeSkillBonusFactor = static_cast<float>(ini.GetDoubleValue("PlayerHelmet", "fMeleeSkillBonusFactor", 0.2));
 	returnHelmetOnLoad = ini.GetBoolValue("PlayerHelmet", "bReturnOnLoad", true);
 	helmetTrackingDurationMinutes = static_cast<float>(ini.GetDoubleValue("PlayerHelmet", "fTrackingDurationMinutes", 5.0));
 	enableHelmetHighlight = ini.GetBoolValue("PlayerHelmet", "bEnableHighlight", true);
@@ -257,6 +275,8 @@ void Settings::Load()
 	highlightB = static_cast<float>(ini.GetDoubleValue("PlayerHelmet", "fHighlightB", 1.0));
 	highlightAlpha = static_cast<float>(ini.GetDoubleValue("PlayerHelmet", "fHighlightAlpha", 0.6));
 	enableHelmetMapMarker = ini.GetBoolValue("PlayerHelmet", "bEnableMapMarker", true);
+	enablePlayerHelmetKnockoffSound = ini.GetBoolValue("PlayerHelmet", "bEnableKnockoffSound", true);
+	playerHelmetKnockoffSoundVolume = static_cast<float>(ini.GetDoubleValue("PlayerHelmet", "fKnockoffSoundVolume", 0.8));
 	{
 		const char* wav = ini.GetValue("PlayerHelmet", "sKnockoffSound", "");
 		strncpy_s(playerHelmetKnockoffSoundFile, wav, sizeof(playerHelmetKnockoffSoundFile) - 1);
@@ -345,6 +365,10 @@ void Settings::Save()
 	ini.SetBoolValue("Helmet", "bEnableMeleeKnockoff", enableMeleeHelmetKnockoff);
 	ini.SetDoubleValue("Helmet", "fMeleeKnockoffChance1H", meleeKnockoffChance1H);
 	ini.SetDoubleValue("Helmet", "fMeleeKnockoffChance2H", meleeKnockoffChance2H);
+	ini.SetBoolValue("Helmet", "bEnableWeightScaling", enableWeightScaling);
+	ini.SetDoubleValue("Helmet", "fWeightPenaltyPerUnit", weightPenaltyPerUnit);
+	ini.SetBoolValue("Helmet", "bEnableMeleeSkillScaling", enableMeleeSkillScaling);
+	ini.SetDoubleValue("Helmet", "fMeleeSkillBonusFactor", meleeSkillBonusFactor);
 	ini.SetValue("Helmet", "sHelmetBypassPerk", helmetBypassPerkStr);
 	ini.SetBoolValue("Helmet", "bEnableLevelBypass", enableHelmetLevelBypass);
 	ini.SetLongValue("Helmet", "iLevelBypassThreshold", helmetLevelBypassThreshold);
@@ -368,6 +392,10 @@ void Settings::Save()
 	ini.SetBoolValue("PlayerHelmet", "bEnableMeleeKnockoff", enablePlayerMeleeHelmetKnockoff);
 	ini.SetDoubleValue("PlayerHelmet", "fMeleeKnockoffChance1H", playerMeleeKnockoffChance1H);
 	ini.SetDoubleValue("PlayerHelmet", "fMeleeKnockoffChance2H", playerMeleeKnockoffChance2H);
+	ini.SetBoolValue("PlayerHelmet", "bEnableWeightScaling", enablePlayerWeightScaling);
+	ini.SetDoubleValue("PlayerHelmet", "fWeightPenaltyPerUnit", playerWeightPenaltyPerUnit);
+	ini.SetBoolValue("PlayerHelmet", "bEnableMeleeSkillScaling", enablePlayerMeleeSkillScaling);
+	ini.SetDoubleValue("PlayerHelmet", "fMeleeSkillBonusFactor", playerMeleeSkillBonusFactor);
 	ini.SetBoolValue("PlayerHelmet", "bReturnOnLoad", returnHelmetOnLoad);
 	ini.SetDoubleValue("PlayerHelmet", "fTrackingDurationMinutes", helmetTrackingDurationMinutes);
 	ini.SetBoolValue("PlayerHelmet", "bEnableHighlight", enableHelmetHighlight);
@@ -376,6 +404,8 @@ void Settings::Save()
 	ini.SetDoubleValue("PlayerHelmet", "fHighlightB", highlightB);
 	ini.SetDoubleValue("PlayerHelmet", "fHighlightAlpha", highlightAlpha);
 	ini.SetBoolValue("PlayerHelmet", "bEnableMapMarker", enableHelmetMapMarker);
+	ini.SetBoolValue("PlayerHelmet", "bEnableKnockoffSound", enablePlayerHelmetKnockoffSound);
+	ini.SetDoubleValue("PlayerHelmet", "fKnockoffSoundVolume", playerHelmetKnockoffSoundVolume);
 	ini.SetValue("PlayerHelmet", "sKnockoffSound", playerHelmetKnockoffSoundFile);
 
 	ini.SetValue("Lists", "sRaceBlocklist", raceBlocklistBuf);
@@ -669,7 +699,38 @@ void Settings::LoadRaceConfigJSON()
 					try { entry.skillWeight = std::stof(skillStr); } catch (...) {}
 				}
 
-				raceConfig.push_back(std::move(entry));
+				std::string catStr = SimpleJsonValue(obj, "Category");
+				if (!catStr.empty()) {
+					if (_stricmp(catStr.c_str(), "None") == 0) entry.categoryOverride = 0;
+					else if (_stricmp(catStr.c_str(), "Humanoid") == 0) entry.categoryOverride = 1;
+					else if (_stricmp(catStr.c_str(), "SmallAnimal") == 0) entry.categoryOverride = 2;
+					else if (_stricmp(catStr.c_str(), "Giant") == 0) entry.categoryOverride = 3;
+					else if (_stricmp(catStr.c_str(), "Troll") == 0) entry.categoryOverride = 4;
+					else if (_stricmp(catStr.c_str(), "Bear") == 0) entry.categoryOverride = 5;
+					else if (_stricmp(catStr.c_str(), "Mammoth") == 0) entry.categoryOverride = 6;
+					else if (_stricmp(catStr.c_str(), "SpiderGiant") == 0) entry.categoryOverride = 7;
+					else if (_stricmp(catStr.c_str(), "Chaurus") == 0) entry.categoryOverride = 8;
+				}
+
+				std::string useCatStr = SimpleJsonValue(obj, "UseCategoryChance");
+				if (!useCatStr.empty()) {
+					entry.useCategoryChance = (_stricmp(useCatStr.c_str(), "true") == 0 || useCatStr == "1");
+				} else if (entry.chanceOverride >= 0.0f) {
+					entry.useCategoryChance = false;
+				}
+
+				// Deduplicate: if this race already exists, update it
+				bool merged = false;
+				for (auto& existing : raceConfig) {
+					if (_stricmp(existing.raceEditorID.c_str(), entry.raceEditorID.c_str()) == 0) {
+						existing = std::move(entry);
+						merged = true;
+						break;
+					}
+				}
+				if (!merged) {
+					raceConfig.push_back(std::move(entry));
+				}
 			}
 		};
 
@@ -708,12 +769,23 @@ void Settings::LoadUserRaceConfig()
 	keys.clear();
 	ini.GetAllKeys("Whitelist", keys);
 	for (const auto& key : keys) {
-		RaceConfigEntry entry;
-		entry.raceEditorID = key.pItem;
-		entry.source = "User";
-		entry.blocked = false;
-		entry.comment = ini.GetValue("Whitelist", key.pItem, "");
-		userRaceConfig.push_back(std::move(entry));
+		bool merged = false;
+		for (auto& existing : userRaceConfig) {
+			if (_stricmp(existing.raceEditorID.c_str(), key.pItem) == 0) {
+				existing.blocked = false;
+				existing.comment = ini.GetValue("Whitelist", key.pItem, "");
+				merged = true;
+				break;
+			}
+		}
+		if (!merged) {
+			RaceConfigEntry entry;
+			entry.raceEditorID = key.pItem;
+			entry.source = "User";
+			entry.blocked = false;
+			entry.comment = ini.GetValue("Whitelist", key.pItem, "");
+			userRaceConfig.push_back(std::move(entry));
+		}
 	}
 
 	keys.clear();
@@ -738,6 +810,7 @@ void Settings::LoadUserRaceConfig()
 			if (_stricmp(existing.raceEditorID.c_str(), key.pItem) == 0) {
 				existing.chanceOverride = chance;
 				existing.skillWeight = skill;
+				if (chance >= 0.0f) existing.useCategoryChance = false;
 				found = true;
 				break;
 			}
@@ -749,6 +822,45 @@ void Settings::LoadUserRaceConfig()
 			entry.blocked = false;
 			entry.chanceOverride = chance;
 			entry.skillWeight = skill;
+			if (chance >= 0.0f) entry.useCategoryChance = false;
+			userRaceConfig.push_back(std::move(entry));
+		}
+	}
+
+	keys.clear();
+	ini.GetAllKeys("Categories", keys);
+	for (const auto& key : keys) {
+		const char* val = ini.GetValue("Categories", key.pItem, "");
+		if (!val || !val[0]) continue;
+
+		std::string valStr(val);
+		int cat = -1;
+		bool useCat = true;
+		auto commaPos = valStr.find(',');
+		try {
+			cat = std::stoi(valStr.substr(0, commaPos));
+			if (commaPos != std::string::npos) {
+				std::string useCatStr = valStr.substr(commaPos + 1);
+				useCat = (useCatStr == "1" || _stricmp(useCatStr.c_str(), "true") == 0);
+			}
+		} catch (...) {}
+
+		bool found = false;
+		for (auto& existing : userRaceConfig) {
+			if (_stricmp(existing.raceEditorID.c_str(), key.pItem) == 0) {
+				existing.categoryOverride = cat;
+				existing.useCategoryChance = useCat;
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			RaceConfigEntry entry;
+			entry.raceEditorID = key.pItem;
+			entry.source = "User";
+			entry.blocked = false;
+			entry.categoryOverride = cat;
+			entry.useCategoryChance = useCat;
 			userRaceConfig.push_back(std::move(entry));
 		}
 	}
@@ -777,6 +889,11 @@ void Settings::SaveUserRaceConfig()
 				snprintf(buf, sizeof(buf), "%.1f", entry.chanceOverride);
 			}
 			ini.SetValue("Chances", entry.raceEditorID.c_str(), buf);
+		}
+		if (entry.categoryOverride >= 0 || !entry.useCategoryChance) {
+			char buf[64];
+			snprintf(buf, sizeof(buf), "%d,%d", entry.categoryOverride, entry.useCategoryChance ? 1 : 0);
+			ini.SetValue("Categories", entry.raceEditorID.c_str(), buf);
 		}
 	}
 

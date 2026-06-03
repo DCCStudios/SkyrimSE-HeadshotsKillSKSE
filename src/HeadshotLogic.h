@@ -23,4 +23,26 @@ namespace HeadshotLogic
 
 	/// Simulates a player helmet knockoff (for debug menu). Calls DeferKnockHelmetOff + HP reduction.
 	void SimulatePlayerHelmetKnockoff(RE::Actor* a_player, Settings* a_settings);
+
+	/// TESHitEvent sink for melee helmet knockoff (fallback when Precision is not installed).
+	class MeleeHitHandler : public RE::BSTEventSink<RE::TESHitEvent>
+	{
+	public:
+		static MeleeHitHandler* GetSingleton();
+		RE::BSEventNotifyControl ProcessEvent(const RE::TESHitEvent* a_event,
+			RE::BSTEventSource<RE::TESHitEvent>* a_source) override;
+	};
+
+	void RegisterMeleeHitSink();
+
+	/// Attempt to connect to Precision API for accurate melee head detection.
+	/// Returns true if Precision was found and callback registered.
+	bool TryRegisterPrecision(SKSE::PluginHandle a_pluginHandle);
+
+	/// Returns true if Precision integration is active (head-based melee detection).
+	bool IsPrecisionActive();
+
+	/// Computes effective helmet knockoff chance after weight penalty and skill bonus.
+	float ComputeEffectiveKnockoffChance(float baseChance, RE::TESObjectARMO* helmet,
+		RE::Actor* attacker, bool isMelee, bool is1H, Settings* s, bool isPlayer);
 }

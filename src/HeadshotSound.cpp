@@ -202,21 +202,86 @@ void PlayHeadshotKillSound()
 	});
 }
 
-void PlayPlayerHelmetKnockoffSound()
+namespace
+{
+	bool IsMetalHelmet(RE::FormID a_armorFormID)
+	{
+		if (!a_armorFormID) return false;
+		auto* armor = RE::TESForm::LookupByID<RE::TESObjectARMO>(a_armorFormID);
+		if (!armor) return false;
+
+		static const char* kMetalMaterials[] = {
+			"ArmorMaterialSteel", "ArmorMaterialSteelPlate",
+			"ArmorMaterialIron", "ArmorMaterialIronBanded",
+			"ArmorMaterialEbony", "ArmorMaterialDaedric",
+			"ArmorMaterialElven", "ArmorMaterialElvenGilded",
+			"ArmorMaterialOrcish", "ArmorMaterialGlass",
+			"ArmorMaterialDwarven", "ArmorMaterialDragonplate",
+			"ArmorMaterialImperialHeavy", "ArmorMaterialImperialStudded",
+			nullptr
+		};
+
+		for (auto p = kMetalMaterials; *p; ++p) {
+			if (armor->HasKeywordString(*p)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	std::string PickRandomKnockoffVariant(const std::string& a_baseName)
+	{
+		namespace fs = std::filesystem;
+		fs::path dir = fs::current_path() / "Data" / "SKSE" / "Plugins" / "HeadshotsKill";
+
+		std::vector<std::string> candidates;
+
+		fs::path basePath = dir / a_baseName;
+		if (fs::exists(basePath)) {
+			candidates.push_back(a_baseName);
+		}
+
+		std::string stem = a_baseName.substr(0, a_baseName.size() - 4);
+		for (int i = 1; i <= 20; ++i) {
+			std::string variant = stem + "_" + std::to_string(i) + ".wav";
+			if (fs::exists(dir / variant)) {
+				candidates.push_back(variant);
+			} else {
+				break;
+			}
+		}
+
+		if (candidates.empty()) {
+			return a_baseName;
+		}
+
+		static std::mt19937 rng{ std::random_device{}() };
+		std::uniform_int_distribution<std::size_t> dist(0, candidates.size() - 1);
+		return candidates[dist(rng)];
+	}
+}
+
+void PlayPlayerHelmetKnockoffSound(RE::FormID a_armorFormID)
 {
 	auto* settings = Settings::GetSingleton();
-	const std::string wavName(settings->playerHelmetKnockoffSoundFile);
-	if (wavName.empty()) return;
+	if (!settings->enablePlayerHelmetKnockoffSound) return;
+
+	const float vol = std::clamp(settings->playerHelmetKnockoffSoundVolume, 0.0f, 1.0f);
+	if (vol <= 0.0f) return;
+
+	const bool metal = IsMetalHelmet(a_armorFormID);
+	const std::string baseName = metal ? "helmetknockoff_metal.wav" : "helmetknockoff.wav";
+	const std::string chosen = PickRandomKnockoffVariant(baseName);
 
 	static std::vector<std::uint8_t> s_knockoffAudioBuffer;
 
-	SKSE::GetTaskInterface()->AddTask([wavName]() {
-		const auto wavPath = ResolveWavPath(wavName);
+	SKSE::GetTaskInterface()->AddTask([chosen, vol]() {
+		const auto wavPath = ResolveWavPath(chosen);
 		if (!std::filesystem::exists(wavPath)) {
 			logger::warn("HeadshotsKill: player knockoff WAV not found: {}", wavPath.string());
 			return;
 		}
-		if (!LoadWAVWithVolume(wavPath, 1.0f, s_knockoffAudioBuffer)) {
+		if (!LoadWAVWithVolume(wavPath, vol, s_knockoffAudioBuffer)) {
 			logger::error("HeadshotsKill: failed to load player knockoff WAV: {}", wavPath.string());
 			return;
 		}
@@ -224,6 +289,8 @@ void PlayPlayerHelmetKnockoffSound()
 			nullptr, SND_MEMORY | SND_ASYNC | SND_NODEFAULT);
 		if (!ok) {
 			logger::error("HeadshotsKill: PlaySoundA failed for knockoff (GetLastError={})", GetLastError());
+		} else {
+			logger::debug("HeadshotsKill: played knockoff sound: {} (vol={:.2f})", chosen, vol);
 		}
 	});
 }

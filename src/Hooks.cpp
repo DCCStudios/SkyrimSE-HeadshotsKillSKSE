@@ -42,14 +42,22 @@ namespace Hooks
 			static bool thunk(RE::Projectile* a_projectile)
 			{
 				if (a_projectile) {
-					HeadshotLogic::OnProjectileImpact(a_projectile);
+					__try {
+						HeadshotLogic::OnProjectileImpact(a_projectile);
+					} __except (EXCEPTION_EXECUTE_HANDLER) {
+						logger::error("HeadshotsKill: exception in OnProjectileImpact (code=0x{:X})",
+							static_cast<unsigned>(GetExceptionCode()));
+					}
 				}
 				bool result = func(a_projectile);
 
-				// Post-processing: force arrows to stick on bare heads after
-				// Ricochet Framework / CIF have had their say.
 				if (a_projectile) {
-					HeadshotLogic::PostImpactStickFix(a_projectile);
+					__try {
+						HeadshotLogic::PostImpactStickFix(a_projectile);
+					} __except (EXCEPTION_EXECUTE_HANDLER) {
+						logger::error("HeadshotsKill: exception in PostImpactStickFix (code=0x{:X})",
+							static_cast<unsigned>(GetExceptionCode()));
+					}
 				}
 				return result;
 			}
@@ -60,7 +68,12 @@ namespace Hooks
 		{
 			static void* thunk(RE::Character* a_character, RE::HitData* a_hitData)
 			{
-				HeadshotLogic::EvaluateHitData(a_character, a_hitData);
+				__try {
+					HeadshotLogic::EvaluateHitData(a_character, a_hitData);
+				} __except (EXCEPTION_EXECUTE_HANDLER) {
+					logger::error("HeadshotsKill: exception in EvaluateHitData (code=0x{:X})",
+						static_cast<unsigned>(GetExceptionCode()));
+				}
 				return func(a_character, a_hitData);
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
