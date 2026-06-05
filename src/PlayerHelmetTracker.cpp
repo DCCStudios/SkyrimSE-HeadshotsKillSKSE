@@ -3,20 +3,21 @@
 #include "Hooks.h"
 #include "Settings.h"
 
+#include <cmath>
+
 void PlayerHelmetTracker::OnHelmetKnockedOff(RE::ObjectRefHandle a_droppedRef, RE::FormID a_armorFormID)
 {
 	if (!a_droppedRef || !a_armorFormID) return;
 
-	trackedHelmetRef   = a_droppedRef;
-	trackedArmorFormID = a_armorFormID;
-	trackedRefFormID   = 0;
-	trackingStart      = std::chrono::steady_clock::now();
-	isTracking         = true;
-	markerActive       = false;
-
 	auto ref = a_droppedRef.get();
-	if (ref) {
-		trackedRefFormID = ref->GetFormID();
+	{
+		std::lock_guard lock(stateMutex);
+		trackedHelmetRef   = a_droppedRef;
+		trackedArmorFormID = a_armorFormID;
+		trackedRefFormID   = ref ? ref->GetFormID() : 0;
+		trackingStart      = std::chrono::steady_clock::now();
+		isTracking         = true;
+		markerActive       = false;
 	}
 
 	auto* settings = Settings::GetSingleton();
@@ -94,6 +95,7 @@ void PlayerHelmetTracker::Update()
 
 bool PlayerHelmetTracker::IsInCooldown() const
 {
+	std::lock_guard lock(stateMutex);
 	if (!cooldownActive) return false;
 	auto* settings = Settings::GetSingleton();
 	const auto now = std::chrono::steady_clock::now();
@@ -103,6 +105,7 @@ bool PlayerHelmetTracker::IsInCooldown() const
 
 void PlayerHelmetTracker::StartCooldown()
 {
+	std::lock_guard lock(stateMutex);
 	cooldownStart = std::chrono::steady_clock::now();
 	cooldownActive = true;
 	if (Settings::GetSingleton()->enableDebugLogging) {
@@ -113,6 +116,7 @@ void PlayerHelmetTracker::StartCooldown()
 
 void PlayerHelmetTracker::StopTracking()
 {
+	std::lock_guard lock(stateMutex);
 	if (!isTracking) return;
 
 	if (markerActive) {
@@ -165,6 +169,7 @@ void PlayerHelmetTracker::ReturnHelmetToPlayer()
 
 void PlayerHelmetTracker::Reset()
 {
+	std::lock_guard lock(stateMutex);
 	isTracking = false;
 	trackedHelmetRef = RE::ObjectRefHandle{};
 	trackedArmorFormID = 0;
@@ -227,6 +232,15 @@ void PlayerHelmetTracker::RemoveHelmetMarker()
 	}
 }
 
+void PlayerHelmetTracker::UpdateHighlightOnly()
+{
+	if (!isTracking) return;
+	auto* settings = Settings::GetSingleton();
+	if (settings->enableHelmetHighlight) {
+		ApplyHighlight();
+	}
+}
+
 void PlayerHelmetTracker::ApplyHighlight()
 {
 	auto ref = trackedHelmetRef.get();
@@ -236,7 +250,16 @@ void PlayerHelmetTracker::ApplyHighlight()
 	if (!obj3D) return;
 
 	auto* settings = Settings::GetSingleton();
-	RE::NiColorA color{ settings->highlightR, settings->highlightG, settings->highlightB, settings->highlightAlpha };
+	float alpha = settings->highlightAlpha;
+
+	if (settings->enableHighlightBlink) {
+		const auto now = std::chrono::steady_clock::now();
+		const double elapsed = std::chrono::duration<double>(now - trackingStart).count();
+		const double phase = std::sin(elapsed * settings->highlightBlinkFrequency * 6.2831853);
+		alpha *= static_cast<float>(phase * 0.5 + 0.5);
+	}
+
+	RE::NiColorA color{ settings->highlightR, settings->highlightG, settings->highlightB, alpha };
 	obj3D->TintScenegraph(color);
 }
 

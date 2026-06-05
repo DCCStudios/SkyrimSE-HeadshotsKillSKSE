@@ -3,6 +3,9 @@
 #include "Menu.h"
 #include "PlayerHelmetTracker.h"
 #include "Settings.h"
+#include "DismemberingFrameworkAPI.h"
+#include "render/DrawHandler.h"
+#include "render/D3DContext.h"
 
 namespace Plugin
 {
@@ -44,6 +47,11 @@ namespace
 		if (!HeadshotLogic::TryRegisterPrecision(SKSE::GetPluginHandle())) {
 			HeadshotLogic::RegisterMeleeHitSink();
 		}
+		if (DismemberingFrameworkAPI::LoadAPI()) {
+			logger::info("Dismembering Framework API loaded (v{})", DismemberingFrameworkAPI::g_API->GetVersion());
+		} else {
+			logger::info("Dismembering Framework not detected (dismember-on-OHKO disabled)");
+		}
 		logger::info("{} initialized", Plugin::NAME);
 		break;
 	case SKSE::MessagingInterface::kPostLoadGame:
@@ -54,6 +62,12 @@ namespace
 		Settings::GetSingleton()->LoadUserRaceConfig();
 		Settings::GetSingleton()->ResolveFormIDs();
 		Hooks::ClearBareHeads();
+		if (Settings::GetSingleton()->enableDebugHitZones) {
+			Render::InstallHooks();
+			if (Render::HasContext()) {
+				DrawHandler::GetSingleton()->Initialize();
+			}
+		}
 		break;
 		default:
 			break;

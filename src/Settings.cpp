@@ -85,6 +85,17 @@ void Settings::ResetToDefaults()
 	applyToPlayerAndFollowers = false;
 	levelGapThreshold = 30;
 	essentialMode = 0;
+	excludeBossFromOHKO = true;
+	bossHeadshotCritical = true;
+	enableDragonHeadshots = false;
+	dragonHeadshotChance = 15.0f;
+	dragonRequireHealthThreshold = false;
+	dragonHealthThresholdPercent = 25.0f;
+	dragonTriggerCriticalHit = true;
+	dragonEyeHitRadius = 28.0f;
+	enableDismemberOnOHKO = false;
+	enableDebugHitZones = false;
+	debugHitZoneRadius = 2000.0f;
 	chanceHumanoid = 100.0f;
 	chanceSmallAnimal = 100.0f;
 	chanceGiant = 15.0f;
@@ -154,6 +165,8 @@ void Settings::ResetToDefaults()
 	highlightG = 1.0f;
 	highlightB = 1.0f;
 	highlightAlpha = 0.6f;
+	enableHighlightBlink = false;
+	highlightBlinkFrequency = 1.5f;
 	enableHelmetMapMarker = true;
 	enablePlayerHelmetKnockoffSound = true;
 	playerHelmetKnockoffSoundVolume = 0.8f;
@@ -191,6 +204,19 @@ void Settings::Load()
 	applyToPlayerAndFollowers = ini.GetBoolValue("Victims", "bApplyToPlayerAndFollowers", false);
 	levelGapThreshold = static_cast<std::int32_t>(ini.GetLongValue("Victims", "iLevelGapThreshold", 30));
 	essentialMode = static_cast<std::int32_t>(ini.GetLongValue("Victims", "iEssentialMode", 0));
+	excludeBossFromOHKO = ini.GetBoolValue("Victims", "bExcludeBossFromOHKO", true);
+	bossHeadshotCritical = ini.GetBoolValue("Victims", "bBossHeadshotCritical", true);
+
+	enableDragonHeadshots = ini.GetBoolValue("Dragons", "bEnableDragonHeadshots", false);
+	dragonHeadshotChance = static_cast<float>(ini.GetDoubleValue("Dragons", "fDragonHeadshotChance", 15.0));
+	dragonRequireHealthThreshold = ini.GetBoolValue("Dragons", "bDragonRequireHealthThreshold", false);
+	dragonHealthThresholdPercent = static_cast<float>(ini.GetDoubleValue("Dragons", "fDragonHealthThresholdPercent", 25.0));
+	dragonTriggerCriticalHit = ini.GetBoolValue("Dragons", "bDragonTriggerCriticalHit", true);
+	dragonEyeHitRadius = static_cast<float>(ini.GetDoubleValue("Dragons", "fDragonEyeHitRadius", 28.0));
+
+	enableDismemberOnOHKO = ini.GetBoolValue("General", "bEnableDismemberOnOHKO", false);
+	enableDebugHitZones = ini.GetBoolValue("Debug", "bEnableDebugHitZones", false);
+	debugHitZoneRadius = static_cast<float>(ini.GetDoubleValue("Debug", "fDebugHitZoneRadius", 2000.0));
 
 	chanceHumanoid = static_cast<float>(ini.GetDoubleValue("Chances", "fHumanoid", 100.0));
 	chanceSmallAnimal = static_cast<float>(ini.GetDoubleValue("Chances", "fSmallAnimal", 100.0));
@@ -274,6 +300,8 @@ void Settings::Load()
 	highlightG = static_cast<float>(ini.GetDoubleValue("PlayerHelmet", "fHighlightG", 1.0));
 	highlightB = static_cast<float>(ini.GetDoubleValue("PlayerHelmet", "fHighlightB", 1.0));
 	highlightAlpha = static_cast<float>(ini.GetDoubleValue("PlayerHelmet", "fHighlightAlpha", 0.6));
+	enableHighlightBlink = ini.GetBoolValue("PlayerHelmet", "bEnableHighlightBlink", false);
+	highlightBlinkFrequency = static_cast<float>(ini.GetDoubleValue("PlayerHelmet", "fHighlightBlinkFrequency", 1.5));
 	enableHelmetMapMarker = ini.GetBoolValue("PlayerHelmet", "bEnableMapMarker", true);
 	enablePlayerHelmetKnockoffSound = ini.GetBoolValue("PlayerHelmet", "bEnableKnockoffSound", true);
 	playerHelmetKnockoffSoundVolume = static_cast<float>(ini.GetDoubleValue("PlayerHelmet", "fKnockoffSoundVolume", 0.8));
@@ -323,6 +351,11 @@ void Settings::Load()
 	highlightG = std::clamp(highlightG, 0.0f, 1.0f);
 	highlightB = std::clamp(highlightB, 0.0f, 1.0f);
 	highlightAlpha = std::clamp(highlightAlpha, 0.0f, 1.0f);
+	highlightBlinkFrequency = std::clamp(highlightBlinkFrequency, 0.1f, 10.0f);
+	dragonHeadshotChance = std::clamp(dragonHeadshotChance, 0.0f, 100.0f);
+	dragonHealthThresholdPercent = std::clamp(dragonHealthThresholdPercent, 1.0f, 100.0f);
+	dragonEyeHitRadius = std::clamp(dragonEyeHitRadius, 5.0f, 60.0f);
+	debugHitZoneRadius = std::clamp(debugHitZoneRadius, 500.0f, 5000.0f);
 }
 
 void Settings::Save()
@@ -337,6 +370,19 @@ void Settings::Save()
 	ini.SetBoolValue("Victims", "bApplyToPlayerAndFollowers", applyToPlayerAndFollowers);
 	ini.SetLongValue("Victims", "iLevelGapThreshold", levelGapThreshold);
 	ini.SetLongValue("Victims", "iEssentialMode", essentialMode);
+	ini.SetBoolValue("Victims", "bExcludeBossFromOHKO", excludeBossFromOHKO);
+	ini.SetBoolValue("Victims", "bBossHeadshotCritical", bossHeadshotCritical);
+
+	ini.SetBoolValue("Dragons", "bEnableDragonHeadshots", enableDragonHeadshots);
+	ini.SetDoubleValue("Dragons", "fDragonHeadshotChance", dragonHeadshotChance);
+	ini.SetBoolValue("Dragons", "bDragonRequireHealthThreshold", dragonRequireHealthThreshold);
+	ini.SetDoubleValue("Dragons", "fDragonHealthThresholdPercent", dragonHealthThresholdPercent);
+	ini.SetBoolValue("Dragons", "bDragonTriggerCriticalHit", dragonTriggerCriticalHit);
+	ini.SetDoubleValue("Dragons", "fDragonEyeHitRadius", dragonEyeHitRadius);
+
+	ini.SetBoolValue("General", "bEnableDismemberOnOHKO", enableDismemberOnOHKO);
+	ini.SetBoolValue("Debug", "bEnableDebugHitZones", enableDebugHitZones);
+	ini.SetDoubleValue("Debug", "fDebugHitZoneRadius", debugHitZoneRadius);
 
 	ini.SetDoubleValue("Chances", "fHumanoid", chanceHumanoid);
 	ini.SetDoubleValue("Chances", "fSmallAnimal", chanceSmallAnimal);
@@ -403,6 +449,8 @@ void Settings::Save()
 	ini.SetDoubleValue("PlayerHelmet", "fHighlightG", highlightG);
 	ini.SetDoubleValue("PlayerHelmet", "fHighlightB", highlightB);
 	ini.SetDoubleValue("PlayerHelmet", "fHighlightAlpha", highlightAlpha);
+	ini.SetBoolValue("PlayerHelmet", "bEnableHighlightBlink", enableHighlightBlink);
+	ini.SetDoubleValue("PlayerHelmet", "fHighlightBlinkFrequency", highlightBlinkFrequency);
 	ini.SetBoolValue("PlayerHelmet", "bEnableMapMarker", enableHelmetMapMarker);
 	ini.SetBoolValue("PlayerHelmet", "bEnableKnockoffSound", enablePlayerHelmetKnockoffSound);
 	ini.SetDoubleValue("PlayerHelmet", "fKnockoffSoundVolume", playerHelmetKnockoffSoundVolume);

@@ -50,6 +50,24 @@ public:
 
 	std::int32_t essentialMode{ 0 };
 
+	bool excludeBossFromOHKO{ true };
+	bool bossHeadshotCritical{ true };
+
+	// --- Dragon ---
+	bool enableDragonHeadshots{ false };
+	float dragonHeadshotChance{ 15.0f };
+	bool dragonRequireHealthThreshold{ false };
+	float dragonHealthThresholdPercent{ 25.0f };
+	bool dragonTriggerCriticalHit{ true };
+	float dragonEyeHitRadius{ 28.0f };
+
+	// --- Dismembering Framework ---
+	bool enableDismemberOnOHKO{ false };
+
+	// --- Debug hit zones ---
+	bool enableDebugHitZones{ false };
+	float debugHitZoneRadius{ 2000.0f };
+
 	float chanceHumanoid{ 100.0f };
 	float chanceSmallAnimal{ 100.0f };
 	float chanceGiant{ 15.0f };
@@ -148,6 +166,8 @@ public:
 	float highlightG{ 1.0f };
 	float highlightB{ 1.0f };
 	float highlightAlpha{ 0.6f };
+	bool enableHighlightBlink{ false };
+	float highlightBlinkFrequency{ 1.5f };
 	bool enableHelmetMapMarker{ true };
 	bool enablePlayerHelmetKnockoffSound{ true };
 	float playerHelmetKnockoffSoundVolume{ 0.8f };

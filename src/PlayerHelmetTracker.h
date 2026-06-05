@@ -13,11 +13,12 @@ public:
 
 	void OnHelmetKnockedOff(RE::ObjectRefHandle a_droppedRef, RE::FormID a_armorFormID);
 	void Update();
+	void UpdateHighlightOnly();
 	void StopTracking();
 	void ReturnHelmetToPlayer();
 	void Reset();
 
-	bool IsTracking() const { return isTracking; }
+	bool IsTracking() const { std::lock_guard lock(stateMutex); return isTracking; }
 	bool IsInCooldown() const;
 	void StartCooldown();
 
@@ -48,6 +49,8 @@ private:
 	void PlaceHelmetMarker();
 	void RemoveHelmetMarker();
 	void ApplyHighlight();
+
+	mutable std::mutex stateMutex;
 
 	RE::ObjectRefHandle trackedHelmetRef{};
 	RE::FormID          trackedArmorFormID{ 0 };

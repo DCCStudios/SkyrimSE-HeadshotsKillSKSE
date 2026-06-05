@@ -3,6 +3,7 @@
 #include "Hooks.h"
 #include "PlayerHelmetTracker.h"
 #include "Settings.h"
+#include "DismemberingFrameworkAPI.h"
 
 #include "RE/B/BGSBodyPartData.h"
 #include "RE/B/BGSBodyPartDefs.h"
@@ -13,6 +14,7 @@
 #include "RE/T/TESHitEvent.h"
 #include "PrecisionAPI.h"
 
+#include <cmath>
 #include <cstring>
 
 namespace HeadshotLogic
@@ -35,6 +37,139 @@ namespace HeadshotLogic
 						return true;
 					}
 				}
+			}
+			return false;
+		}
+
+		bool IsBossActor(RE::Actor* a_actor)
+		{
+			if (!a_actor) return false;
+
+			// 1) Mod keyword "ActorTypeBoss" (community convention, added by many mods)
+			if (a_actor->HasKeywordString("ActorTypeBoss")) {
+				return true;
+			}
+
+			// 2) Vanilla Location Ref Type "Boss" (LCRT 0x000130F7 in Skyrim.esm)
+			auto* player = RE::PlayerCharacter::GetSingleton();
+			if (player) {
+				RE::BGSLocation* currentLoc = player->GetCurrentLocation();
+				if (currentLoc) {
+					static RE::BGSLocationRefType* bossRefType = nullptr;
+					static bool lookedUp = false;
+					if (!lookedUp) {
+						lookedUp = true;
+						auto* dh = RE::TESDataHandler::GetSingleton();
+						if (dh) {
+							bossRefType = dh->LookupForm<RE::BGSLocationRefType>(0x000130F7, "Skyrim.esm");
+						}
+					}
+					if (bossRefType) {
+						const RE::FormID actorID = a_actor->GetFormID();
+						for (const auto& sref : currentLoc->specialRefs) {
+							if (sref.type == bossRefType && sref.refData.refID == actorID) {
+								return true;
+							}
+						}
+					}
+				}
+			}
+
+			return false;
+		}
+
+		RE::NiAVObject* FindBrowNode(RE::NiAVObject* a_root, const char* a_prefix)
+		{
+			if (!a_root) return nullptr;
+			static const char* suffixes[] = {
+				" [LLBr]", " [LUBr]", " [RLBr]", " [RUBr]",
+				"", nullptr
+			};
+			char buf[64];
+			for (int i = 0; suffixes[i] != nullptr; ++i) {
+				snprintf(buf, sizeof(buf), "%s%s", a_prefix, suffixes[i]);
+				auto* obj = a_root->GetObjectByName(buf);
+				if (obj) return obj;
+			}
+			for (int idx = 0; idx < 100; ++idx) {
+				snprintf(buf, sizeof(buf), "%s [%d]", a_prefix, idx);
+				auto* obj = a_root->GetObjectByName(buf);
+				if (obj) return obj;
+			}
+			return nullptr;
+		}
+
+		bool IsDragonEyeHit(RE::Actor* a_target, const RE::NiPoint3& a_impactPos)
+		{
+			auto* root = a_target->Get3D();
+			if (!root) return false;
+
+			auto* settings = Settings::GetSingleton();
+
+			auto* headNode = root->GetObjectByName("NPC Head [Head]");
+			if (!headNode) headNode = FindBrowNode(root, "NPC Head");
+
+			struct EyeZone { const char* lowerPrefix; const char* upperPrefix; };
+			static constexpr EyeZone eyes[] = {
+				{ "NPC LLBrow", "NPC LUBrow" },
+				{ "NPC RLBrow", "NPC RUBrow" },
+			};
+
+			bool anyNodeFound = false;
+			for (auto& eye : eyes) {
+				auto* lowerNode = FindBrowNode(root, eye.lowerPrefix);
+				auto* upperNode = FindBrowNode(root, eye.upperPrefix);
+				if (!lowerNode || !upperNode) {
+					if (settings->enableDebugLogging) {
+						logger::info("HeadshotsKill: dragon eye node lookup: {}={} {}={}",
+							eye.lowerPrefix, lowerNode ? "found" : "MISSING",
+							eye.upperPrefix, upperNode ? "found" : "MISSING");
+					}
+					continue;
+				}
+				anyNodeFound = true;
+
+				RE::NiPoint3 browMid;
+				browMid.x = (lowerNode->world.translate.x + upperNode->world.translate.x) * 0.5f;
+				browMid.y = (lowerNode->world.translate.y + upperNode->world.translate.y) * 0.5f;
+				browMid.z = (lowerNode->world.translate.z + upperNode->world.translate.z) * 0.5f;
+
+				RE::NiPoint3 eyeCenter = browMid;
+				if (headNode) {
+					RE::NiPoint3 outward;
+					outward.x = browMid.x - headNode->world.translate.x;
+					outward.y = browMid.y - headNode->world.translate.y;
+					outward.z = browMid.z - headNode->world.translate.z;
+					float len = std::sqrt(outward.x * outward.x + outward.y * outward.y + outward.z * outward.z);
+					if (len > 0.01f) {
+						outward.x /= len;
+						outward.y /= len;
+						outward.z /= len;
+						float offset = settings->dragonEyeHitRadius * 0.6f;
+						eyeCenter.x += outward.x * offset;
+						eyeCenter.y += outward.y * offset;
+						eyeCenter.z += outward.z * offset;
+					}
+				}
+
+				float radius = settings->dragonEyeHitRadius;
+
+				float ix = a_impactPos.x - eyeCenter.x;
+				float iy = a_impactPos.y - eyeCenter.y;
+				float iz = a_impactPos.z - eyeCenter.z;
+				float distSq = ix * ix + iy * iy + iz * iz;
+				float dist = std::sqrt(distSq);
+
+				if (settings->enableDebugLogging) {
+					logger::info("HeadshotsKill: dragon eye zone center=({:.1f},{:.1f},{:.1f}) dist={:.1f} radius={:.1f} {}",
+						eyeCenter.x, eyeCenter.y, eyeCenter.z, dist, radius,
+						dist < radius ? "HIT" : "miss");
+				}
+
+				if (distSq < radius * radius) return true;
+			}
+			if (!anyNodeFound && settings->enableDebugLogging) {
+				logger::info("HeadshotsKill: dragon {:08X} - NO brow nodes found in skeleton!", a_target->GetFormID());
 			}
 			return false;
 		}
@@ -422,6 +557,20 @@ namespace HeadshotLogic
 			return best;
 		}
 
+		/// Check whether a NiNode likely belongs to the given actor's 3D scene graph.
+		/// Walks up parent chain looking for the actor's Get3D() root or Get3D(true) first-person root.
+		bool NodeBelongsToActor(RE::Actor* a_actor, RE::NiAVObject* a_node)
+		{
+			if (!a_actor || !a_node) return false;
+			auto* root3D = a_actor->Get3D();
+			auto* rootFirst = a_actor->Get3D(true);
+			if (!root3D && !rootFirst) return false;
+			for (auto* parent = a_node->parent; parent; parent = parent->parent) {
+				if (parent == root3D || parent == rootFirst) return true;
+			}
+			return (a_node == root3D || a_node == rootFirst);
+		}
+
 		/// Determine if the projectile impact was a head hit using all available methods.
 		/// a_damageRootNode: from impact->damageRootNode (may be null).
 		/// a_impactPos: from impact->desiredTargetLoc (used for geometric fallback).
@@ -429,14 +578,23 @@ namespace HeadshotLogic
 			const RE::NiPoint3& a_impactPos, std::string& a_outNodeName)
 		{
 			// Tier 1 – use damageRootNode directly if present.
+			// Validate ownership to avoid dereferencing stale geometry from other actors,
+			// but if validation fails, fall through to geometric detection rather than
+			// returning false outright (the node might be valid but parented unusually).
 			if (a_damageRootNode) {
+				if (NodeBelongsToActor(a_target, a_damageRootNode)) {
+					if (IsHeadNode(a_target, a_damageRootNode)) {
+						a_outNodeName = a_damageRootNode->name.c_str() ? a_damageRootNode->name.c_str() : "(null)";
+						return true;
+					}
+					// damageRootNode is set and belongs to actor but isn't the head.
+					return false;
+				}
+				// Ownership check failed but node name looks like head — trust the engine.
 				if (IsHeadNode(a_target, a_damageRootNode)) {
 					a_outNodeName = a_damageRootNode->name.c_str() ? a_damageRootNode->name.c_str() : "(null)";
 					return true;
 				}
-				// damageRootNode is set but isn't the head — don't do a geometric search;
-				// the engine already told us which bone this was.
-				return false;
 			}
 
 			// Tier 2 – no damageRootNode: find the skeleton node closest to the impact point.
@@ -846,7 +1004,31 @@ void HeadshotLogic::OnProjectileImpact(RE::Projectile* a_projectile)
 		if (tl > sl + settings->levelGapThreshold) return;
 	}
 
-	if (target->HasKeywordString("ActorTypeDragon"sv)) return;
+	if (target->HasKeywordString("ActorTypeDragon"sv)) {
+		if (!settings->enableDragonHeadshots) {
+			if (settings->enableDebugLogging) {
+				logger::info("HeadshotsKill: dragon {:08X} skipped (enableDragonHeadshots=false)", target->GetFormID());
+			}
+			return;
+		}
+		bool eyeHit = IsDragonEyeHit(target, impact->desiredTargetLoc);
+		if (settings->enableDebugLogging) {
+			logger::info("HeadshotsKill: dragon eye check {:08X} eyeHit={} impactPos=({:.1f},{:.1f},{:.1f}) radius={:.1f}",
+				target->GetFormID(), eyeHit,
+				impact->desiredTargetLoc.x, impact->desiredTargetLoc.y, impact->desiredTargetLoc.z,
+				settings->dragonEyeHitRadius);
+		}
+		if (!eyeHit) return;
+		if (!RollPercent(settings->dragonHeadshotChance)) return;
+		if (settings->dragonRequireHealthThreshold) {
+			float curHP = target->AsActorValueOwner()->GetActorValue(RE::ActorValue::kHealth);
+			float maxHP = target->AsActorValueOwner()->GetBaseActorValue(RE::ActorValue::kHealth);
+			if (maxHP > 0 && (curHP / maxHP * 100.0f) > settings->dragonHealthThresholdPercent) return;
+		}
+		Hooks::PushPendingCandidate(shooter ? shooter->GetFormID() : 0,
+			target->GetFormID(), 0xFF, true);
+		return;
+	}
 	if (HasKeywordImmunity(target, settings) || IsRaceBlocked(target, settings)) return;
 
 	const Category cat = ClassifyActor(target);
@@ -979,6 +1161,18 @@ void HeadshotLogic::EvaluateHitData(RE::Character* a_character, RE::HitData* a_h
 		return;
 	}
 
+	// Dragon path: eye-shot was already validated in OnProjectileImpact
+	if (cat == 0xFF) {
+		if (settings->dragonTriggerCriticalHit) {
+			a_hitData->flags.set(RE::HitData::Flag::kCritical);
+			if (settings->enableDebugLogging) {
+				logger::debug("HeadshotsKill: dragon {:08X} - triggered critical hit", target->GetFormID());
+			}
+			return;
+		}
+		// Fall through to OHKO path below
+	}
+
 	// Head detection: engine body part (damageLimb == kHead) OR bone-name/geometric fallback.
 	const bool headByLimb = (a_hitData->damageLimb ==
 		static_cast<std::uint32_t>(RE::BGSBodyPartDefs::LIMB_ENUM::kHead));
@@ -989,7 +1183,7 @@ void HeadshotLogic::EvaluateHitData(RE::Character* a_character, RE::HitData* a_h
 			target->GetFormID(), a_hitData->damageLimb, headByLimb, headByBone, isHeadHit);
 	}
 
-	if (!isHeadHit) return;
+	if (cat != 0xFF && !isHeadHit) return;
 
 	// --- Player headshot path ---
 	// Flow: helmet on -> knockoff only | no helmet + cooldown -> kill | no helmet -> HP reduction + start cooldown
@@ -1138,6 +1332,20 @@ void HeadshotLogic::EvaluateHitData(RE::Character* a_character, RE::HitData* a_h
 		}
 	}
 
+	if (settings->excludeBossFromOHKO && IsBossActor(target)) {
+		if (settings->bossHeadshotCritical) {
+			a_hitData->flags.set(RE::HitData::Flag::kCritical);
+			if (settings->enableDebugLogging) {
+				logger::debug("HeadshotsKill: boss {:08X} - OHKO blocked, triggered critical hit instead", target->GetFormID());
+			}
+		} else {
+			if (settings->enableDebugLogging) {
+				logger::debug("HeadshotsKill: OHKO blocked - target {:08X} is a boss", target->GetFormID());
+			}
+		}
+		return;
+	}
+
 	const float kill = settings->killDamage;
 	a_hitData->totalDamage    = kill;
 	a_hitData->physicalDamage = kill;
@@ -1151,6 +1359,25 @@ void HeadshotLogic::EvaluateHitData(RE::Character* a_character, RE::HitData* a_h
 
 	if (shooter && shooter->IsPlayerRef()) {
 		PlayHeadshotKillSound();
+	}
+
+	if (settings->enableDismemberOnOHKO && DismemberingFrameworkAPI::g_API) {
+		const bool isHumanoid = (cat == static_cast<std::uint8_t>(Category::Humanoid));
+		if (isHumanoid && target && !target->IsPlayerRef()) {
+			RE::Actor* targetCopy = target;
+			RE::Actor* shooterCopy = shooter;
+			SKSE::GetTaskInterface()->AddTask([targetCopy, shooterCopy]() {
+				if (!targetCopy || targetCopy->IsDeleted()) return;
+				RE::TESObjectWEAP* weap = nullptr;
+				if (shooterCopy) {
+					auto* equipped = shooterCopy->GetEquippedObject(false);
+					if (equipped) weap = equipped->As<RE::TESObjectWEAP>();
+				}
+				DismemberingFrameworkAPI::g_API->Dismember(
+					targetCopy, RE::BSFixedString("NPC Head [Head]"),
+					shooterCopy, weap, nullptr);
+			});
+		}
 	}
 }
 
@@ -1360,6 +1587,112 @@ bool IsPrecisionActive()
 	return g_precisionActive.load();
 }
 
+static void PrecisionPostHitCallback_Impl(const PRECISION_API::PrecisionHitData& a_hitData, const RE::HitData& a_vanillaHitData)
+{
+	auto* settings = Settings::GetSingleton();
+	if (!settings->enableMod) return;
+
+	auto* victim = a_hitData.target ? a_hitData.target->As<RE::Actor>() : nullptr;
+	auto* attacker = a_hitData.attacker;
+
+	logger::debug("HeadshotsKill [Precision]: PostHitCallback fired - attacker={:08X} target={:08X} flags={:08X}",
+		attacker ? attacker->GetFormID() : 0,
+		victim ? victim->GetFormID() : 0,
+		a_vanillaHitData.flags.underlying());
+
+	if (!victim || !attacker || victim->IsDead()) return;
+
+	if (!victim->Is3DLoaded() || !victim->Get3D()) return;
+
+	const char* headNodeName = GetRaceHeadNodeName(victim);
+	auto* root = victim->Get3D()->AsNode();
+	if (!root) return;
+
+	RE::BSFixedString bsName(headNodeName);
+	auto* headNode = root->GetObjectByName(bsName);
+	if (!headNode) return;
+
+	const auto& headPos = headNode->world.translate;
+	const auto& hitPos = a_hitData.hitPos;
+	const float dx = hitPos.x - headPos.x;
+	const float dy = hitPos.y - headPos.y;
+	const float dz = hitPos.z - headPos.z;
+	const float distSq = dx * dx + dy * dy + dz * dz;
+
+	const float scale = victim->GetScale();
+	const float radius = 20.0f * scale;
+	const bool isHeadHit = (distSq < radius * radius);
+
+	logger::debug("HeadshotsKill [Precision]: victim={:08X} hitPos=({:.0f},{:.0f},{:.0f}) headPos=({:.0f},{:.0f},{:.0f}) dist={:.1f} radius={:.1f} head={}",
+		victim->GetFormID(), hitPos.x, hitPos.y, hitPos.z, headPos.x, headPos.y, headPos.z, std::sqrt(distSq), radius, isHeadHit);
+
+	if (!isHeadHit) return;
+
+	if (!HasProtectiveHeadArmor(victim)) return;
+
+	auto* weapon = a_vanillaHitData.weapon;
+	if (!weapon) return;
+
+	const auto wtype = weapon->GetWeaponType();
+	const bool is1H = (wtype == RE::WEAPON_TYPE::kOneHandSword || wtype == RE::WEAPON_TYPE::kOneHandAxe ||
+	                   wtype == RE::WEAPON_TYPE::kOneHandMace || wtype == RE::WEAPON_TYPE::kOneHandDagger);
+	const bool is2H = (wtype == RE::WEAPON_TYPE::kTwoHandSword || wtype == RE::WEAPON_TYPE::kTwoHandAxe);
+	if (!is1H && !is2H) return;
+
+	float baseChance = 0.0f;
+	const bool isPlayerVictim = victim->IsPlayerRef();
+	if (isPlayerVictim && settings->enablePlayerMeleeHelmetKnockoff) {
+		baseChance = is1H ? settings->playerMeleeKnockoffChance1H : settings->playerMeleeKnockoffChance2H;
+	} else if (!isPlayerVictim && settings->enableMeleeHelmetKnockoff) {
+		baseChance = is1H ? settings->meleeKnockoffChance1H : settings->meleeKnockoffChance2H;
+	} else {
+		return;
+	}
+
+	// Get helmet for weight scaling
+	RE::TESObjectARMO* helmet = nullptr;
+	auto* changes = victim->GetInventoryChanges();
+	if (changes && changes->entryList) {
+		for (auto* entry : *changes->entryList) {
+			if (entry && entry->object && entry->IsWorn()) {
+				auto* armo = entry->object->As<RE::TESObjectARMO>();
+				if (armo && armo->HasPartOf(RE::BGSBipedObjectForm::BipedObjectSlot::kHead)) {
+					helmet = armo;
+					break;
+				}
+			}
+		}
+	}
+
+	float chance = ComputeKnockoffChanceLocal(baseChance, helmet, attacker, true, is1H, settings, isPlayerVictim);
+
+	if (chance <= 0.0f) return;
+	bool success = (chance >= 100.0f);
+	if (!success) {
+		const auto n = static_cast<std::uint32_t>(std::round(chance * 100.0f));
+		const std::uint32_t r = static_cast<std::uint32_t>(rand()) % 10000u;
+		success = (r < std::min<std::uint32_t>(10000u, n));
+	}
+
+	if (success) {
+		if (settings->enableDebugLogging) {
+			logger::debug("HeadshotsKill [Precision]: melee head knockoff on {:08X} (base={:.1f}% effective={:.1f}%)",
+				victim->GetFormID(), baseChance, chance);
+		}
+		DeferKnockHelmetOff(victim, attacker, settings, true, true, is1H);
+	}
+}
+
+static void PrecisionPostHitCallback_SEH(const PRECISION_API::PrecisionHitData& a_hitData, const RE::HitData& a_vanillaHitData)
+{
+	__try {
+		PrecisionPostHitCallback_Impl(a_hitData, a_vanillaHitData);
+	} __except (EXCEPTION_EXECUTE_HANDLER) {
+		logger::error("HeadshotsKill: exception in Precision PostHitCallback (code=0x{:X})",
+			static_cast<unsigned>(GetExceptionCode()));
+	}
+}
+
 bool TryRegisterPrecision(SKSE::PluginHandle a_pluginHandle)
 {
 	auto* api = static_cast<PRECISION_API::IVPrecision1*>(PRECISION_API::RequestPluginAPI(PRECISION_API::InterfaceVersion::V1));
@@ -1368,100 +1701,7 @@ bool TryRegisterPrecision(SKSE::PluginHandle a_pluginHandle)
 		return false;
 	}
 
-	auto result = api->AddPostHitCallback(a_pluginHandle, [](const PRECISION_API::PrecisionHitData& a_hitData, const RE::HitData& a_vanillaHitData) {
-		auto* settings = Settings::GetSingleton();
-		if (!settings->enableMod) return;
-
-		auto* victim = a_hitData.target ? a_hitData.target->As<RE::Actor>() : nullptr;
-		auto* attacker = a_hitData.attacker;
-
-		logger::debug("HeadshotsKill [Precision]: PostHitCallback fired - attacker={:08X} target={:08X} flags={:08X}",
-			attacker ? attacker->GetFormID() : 0,
-			victim ? victim->GetFormID() : 0,
-			a_vanillaHitData.flags.underlying());
-
-		if (!victim || !attacker || victim->IsDead()) return;
-
-		if (!victim->Is3DLoaded() || !victim->Get3D()) return;
-
-		const char* headNodeName = GetRaceHeadNodeName(victim);
-		auto* root = victim->Get3D()->AsNode();
-		if (!root) return;
-
-		RE::BSFixedString bsName(headNodeName);
-		auto* headNode = root->GetObjectByName(bsName);
-		if (!headNode) return;
-
-		const auto& headPos = headNode->world.translate;
-		const auto& hitPos = a_hitData.hitPos;
-		const float dx = hitPos.x - headPos.x;
-		const float dy = hitPos.y - headPos.y;
-		const float dz = hitPos.z - headPos.z;
-		const float distSq = dx * dx + dy * dy + dz * dz;
-
-		const float scale = victim->GetScale();
-		const float radius = 20.0f * scale;
-		const bool isHeadHit = (distSq < radius * radius);
-
-		logger::debug("HeadshotsKill [Precision]: victim={:08X} hitPos=({:.0f},{:.0f},{:.0f}) headPos=({:.0f},{:.0f},{:.0f}) dist={:.1f} radius={:.1f} head={}",
-			victim->GetFormID(), hitPos.x, hitPos.y, hitPos.z, headPos.x, headPos.y, headPos.z, std::sqrt(distSq), radius, isHeadHit);
-
-		if (!isHeadHit) return;
-
-		if (!HasProtectiveHeadArmor(victim)) return;
-
-		auto* weapon = a_vanillaHitData.weapon;
-		if (!weapon) return;
-
-		const auto wtype = weapon->GetWeaponType();
-		const bool is1H = (wtype == RE::WEAPON_TYPE::kOneHandSword || wtype == RE::WEAPON_TYPE::kOneHandAxe ||
-		                   wtype == RE::WEAPON_TYPE::kOneHandMace || wtype == RE::WEAPON_TYPE::kOneHandDagger);
-		const bool is2H = (wtype == RE::WEAPON_TYPE::kTwoHandSword || wtype == RE::WEAPON_TYPE::kTwoHandAxe);
-		if (!is1H && !is2H) return;
-
-		float baseChance = 0.0f;
-		const bool isPlayerVictim = victim->IsPlayerRef();
-		if (isPlayerVictim && settings->enablePlayerMeleeHelmetKnockoff) {
-			baseChance = is1H ? settings->playerMeleeKnockoffChance1H : settings->playerMeleeKnockoffChance2H;
-		} else if (!isPlayerVictim && settings->enableMeleeHelmetKnockoff) {
-			baseChance = is1H ? settings->meleeKnockoffChance1H : settings->meleeKnockoffChance2H;
-		} else {
-			return;
-		}
-
-		// Get helmet for weight scaling
-		RE::TESObjectARMO* helmet = nullptr;
-		auto* changes = victim->GetInventoryChanges();
-		if (changes && changes->entryList) {
-			for (auto* entry : *changes->entryList) {
-				if (entry && entry->object && entry->IsWorn()) {
-					auto* armo = entry->object->As<RE::TESObjectARMO>();
-					if (armo && armo->HasPartOf(RE::BGSBipedObjectForm::BipedObjectSlot::kHead)) {
-						helmet = armo;
-						break;
-					}
-				}
-			}
-		}
-
-		float chance = ComputeKnockoffChanceLocal(baseChance, helmet, attacker, true, is1H, settings, isPlayerVictim);
-
-		if (chance <= 0.0f) return;
-		bool success = (chance >= 100.0f);
-		if (!success) {
-			const auto n = static_cast<std::uint32_t>(std::round(chance * 100.0f));
-			const std::uint32_t r = static_cast<std::uint32_t>(rand()) % 10000u;
-			success = (r < std::min<std::uint32_t>(10000u, n));
-		}
-
-		if (success) {
-			if (settings->enableDebugLogging) {
-				logger::debug("HeadshotsKill [Precision]: melee head knockoff on {:08X} (base={:.1f}% effective={:.1f}%)",
-					victim->GetFormID(), baseChance, chance);
-			}
-			DeferKnockHelmetOff(victim, attacker, settings, true, true, is1H);
-		}
-	});
+	auto result = api->AddPostHitCallback(a_pluginHandle, PrecisionPostHitCallback_SEH);
 
 	if (result == PRECISION_API::APIResult::OK) {
 		g_precisionAPI = api;

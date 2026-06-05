@@ -1,8 +1,11 @@
 #include "Menu.h"
+#include "DismemberingFrameworkAPI.h"
 #include "HeadshotLogic.h"
 #include "Hooks.h"
 #include "PlayerHelmetTracker.h"
 #include "Settings.h"
+#include "render/D3DContext.h"
+#include "render/DrawHandler.h"
 
 #include <algorithm>
 #include <cstring>
@@ -116,6 +119,26 @@ namespace Menu
 		}
 		ImGui::SetItemTooltip("How to handle essential (unkillable) NPCs:\n- Skip: no headshot damage applied at all\n- Apply: damage is dealt but the NPC enters bleedout instead of dying");
 
+		if (ImGui::Checkbox("Exclude bosses from OHKO", &s->excludeBossFromOHKO)) s->Save();
+		ImGui::SetItemTooltip("When enabled, boss enemies are immune to the headshot instakill.\nBosses are detected via the vanilla Location Ref Type 'Boss'\nand the mod keyword 'ActorTypeBoss' (if present).\nDefault: ON.");
+
+		ImGui::BeginDisabled(!s->excludeBossFromOHKO);
+		if (ImGui::Checkbox("Trigger critical hit on boss headshot", &s->bossHeadshotCritical)) s->Save();
+		ImGui::SetItemTooltip("When a boss is excluded from OHKO, still reward the headshot\nby triggering a guaranteed vanilla critical hit.\nDefault: ON.");
+		ImGui::EndDisabled();
+
+		ImGui::Separator();
+		ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.6f, 1.0f), "Dismembering Framework");
+		if (DismemberingFrameworkAPI::g_API) {
+			ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.3f, 1.0f), "DF: detected");
+		} else {
+			ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "DF: not found");
+		}
+		ImGui::BeginDisabled(!DismemberingFrameworkAPI::g_API);
+		if (ImGui::Checkbox("Enable head dismemberment on OHKO", &s->enableDismemberOnOHKO)) s->Save();
+		ImGui::SetItemTooltip("When enabled, humanoid NPCs killed by headshot OHKO will have their\nhead dismembered via the Dismembering Framework.\nRequires DF to be installed and detected.\nDefault: OFF.");
+		ImGui::EndDisabled();
+
 		ImGui::Separator();
 		ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "INI Management");
 		if (ImGui::Button("Save INI")) {
@@ -223,11 +246,11 @@ namespace Menu
 			sk("Chaurus##sk", &s->skillInfluenceChaurus, "Default: 0.0");
 
 			ImGui::Spacing();
-			float spTh = s->giantSpiderScaleThreshold;
-			if (ImGui::SliderFloat("Giant spider scale threshold", &spTh, 1.0f, 2.5f, "%.2f")) {
-				s->giantSpiderScaleThreshold = std::clamp(spTh, 1.0f, 3.0f);
-				s->Save();
-			}
+		float spTh = s->giantSpiderScaleThreshold;
+		if (ImGui::SliderFloat("Giant spider scale threshold", &spTh, 1.0f, 2.5f, "%.2f")) {
+			s->giantSpiderScaleThreshold = std::clamp(spTh, 1.0f, 3.0f);
+			s->Save();
+		}
 			ImGui::SetItemTooltip("Spiders at or above this scale use 'Giant frostbite spiders' chance.\nBelow uses 'Small animals'.\nDefault: 1.15.");
 			ImGui::TreePop();
 		}
@@ -653,6 +676,56 @@ namespace Menu
 			s->Save();
 		}
 		ImGui::SetItemTooltip("Comma-separated keyword list (e.g. ActorTypeUndead,ActorTypeGhost).");
+
+		// =================================================================
+		// Dragons
+		// =================================================================
+		ImGui::Separator();
+		ImGui::Spacing();
+		ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.3f, 1.0f), "Dragons");
+		ImGui::TextWrapped(
+			"Dragons require hitting the eye area (between brow nodes) to trigger. "
+			"Generic head hits are not enough.");
+		ImGui::Spacing();
+
+		if (ImGui::Checkbox("Enable dragon headshots##dragonEnable", &s->enableDragonHeadshots)) {
+			s->Save();
+		}
+		ImGui::SetItemTooltip("Allow instakills/crits on dragons when shooting their eye area.\nDefault: OFF.");
+
+		ImGui::BeginDisabled(!s->enableDragonHeadshots);
+
+		if (ImGui::SliderFloat("Dragon headshot chance##dragonChance", &s->dragonHeadshotChance, 0.0f, 100.0f, "%.1f%%")) {
+			s->dragonHeadshotChance = std::clamp(s->dragonHeadshotChance, 0.0f, 100.0f);
+			s->Save();
+		}
+		ImGui::SetItemTooltip("Chance for a valid dragon eye-shot to proc.\nDefault: 15%%.");
+
+		if (ImGui::Checkbox("Only when below HP threshold##dragonHP", &s->dragonRequireHealthThreshold)) {
+			s->Save();
+		}
+		ImGui::SetItemTooltip("Only proc when the dragon's current HP is below this percentage of max.\nDefault: OFF.");
+
+		ImGui::BeginDisabled(!s->dragonRequireHealthThreshold);
+		if (ImGui::SliderFloat("HP threshold##dragonHPPct", &s->dragonHealthThresholdPercent, 1.0f, 100.0f, "%.0f%%")) {
+			s->dragonHealthThresholdPercent = std::clamp(s->dragonHealthThresholdPercent, 1.0f, 100.0f);
+			s->Save();
+		}
+		ImGui::SetItemTooltip("Dragon must be below this %% of max HP for the headshot to proc.\nDefault: 25%%.");
+		ImGui::EndDisabled();
+
+		if (ImGui::Checkbox("Trigger critical hit instead of instakill##dragonCrit", &s->dragonTriggerCriticalHit)) {
+			s->Save();
+		}
+		ImGui::SetItemTooltip("Use the vanilla critical hit system instead of dealing OHKO damage.\nDefault: ON.");
+
+		if (ImGui::SliderFloat("Eye hit radius##dragonEyeRadius", &s->dragonEyeHitRadius, 5.0f, 60.0f, "%.0f units")) {
+			s->dragonEyeHitRadius = std::clamp(s->dragonEyeHitRadius, 5.0f, 60.0f);
+			s->Save();
+		}
+		ImGui::SetItemTooltip("Radius of the spherical hit zone around each eye.\nThe brow nodes are inside the skull, so this needs to be generous\nenough to catch arrows hitting the skin surface.\nDefault: 28.");
+
+		ImGui::EndDisabled();
 	}
 
 	// =========================================================================
@@ -750,7 +823,10 @@ namespace Menu
 		ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.6f, 1.0f), "Bypass Conditions");
 		ImGui::TextWrapped("Bypass lets headshots ignore the helmet entirely (straight to OHKO).");
 
-		if (ImGui::InputText("Bypass perk (Plugin.esp:0xID)", s->helmetBypassPerkStr, s->kMaxFormIDStrChars)) s->Save();
+		if (ImGui::InputText("Bypass perk (Plugin.esp:0xID)", s->helmetBypassPerkStr, s->kMaxFormIDStrChars)) {
+			s->Save();
+			s->ResolveFormIDs();
+		}
 		ImGui::SetItemTooltip("If the shooter has this perk, their headshots bypass helmets entirely.\nFormat: PluginName.esp:0xFormID (e.g. Skyrim.esm:0x12345).\nLeave empty to disable perk bypass.");
 		if (s->helmetBypassPerkStr[0]) {
 			ImGui::SameLine();
@@ -761,6 +837,152 @@ namespace Menu
 			}
 		}
 
+		ImGui::Spacing();
+		ImGui::TextDisabled("Or pick from loaded plugins:");
+		{
+			static int selectedPluginIdx = 0;
+			static int selectedPerkIdx = 0;
+			static std::vector<std::string> pluginNames;
+			static std::vector<std::pair<RE::FormID, std::string>> filteredPerks;
+			static bool needRefresh = true;
+			static char pluginFilter[128] = "";
+			static char perkFilter[128] = "";
+
+			if (needRefresh) {
+				pluginNames.clear();
+				auto* dh = RE::TESDataHandler::GetSingleton();
+				if (dh) {
+					for (auto* file : dh->files) {
+						if (file && file->fileName[0]) {
+							pluginNames.push_back(file->fileName);
+						}
+					}
+				}
+				needRefresh = false;
+				selectedPluginIdx = 0;
+				filteredPerks.clear();
+				pluginFilter[0] = '\0';
+				perkFilter[0] = '\0';
+			}
+
+			if (ImGui::Button("Refresh plugins##perk")) needRefresh = true;
+			ImGui::SetItemTooltip("Re-scan loaded plugins");
+			ImGui::SameLine();
+
+			if (!pluginNames.empty()) {
+				int prevPlugin = selectedPluginIdx;
+				const char* pluginPreview = (selectedPluginIdx >= 0 && selectedPluginIdx < static_cast<int>(pluginNames.size()))
+					? pluginNames[static_cast<std::size_t>(selectedPluginIdx)].c_str() : "";
+				ImGui::SetNextItemWidth(200.0f);
+				if (ImGui::BeginCombo("Plugin##perk", pluginPreview)) {
+					ImGui::SetNextItemWidth(-FLT_MIN);
+					if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+					ImGui::InputTextWithHint("##pluginSearch", "Search...", pluginFilter, sizeof(pluginFilter));
+					for (int i = 0; i < static_cast<int>(pluginNames.size()); ++i) {
+						if (pluginFilter[0]) {
+							bool match = false;
+							const char* hay = pluginNames[static_cast<std::size_t>(i)].c_str();
+							const char* needle = pluginFilter;
+							for (const char* h = hay; *h; ++h) {
+								const char* a = h;
+								const char* b = needle;
+								while (*a && *b && ((*a | 32) == (*b | 32))) { ++a; ++b; }
+								if (!*b) { match = true; break; }
+							}
+							if (!match) continue;
+						}
+						const bool selected = (i == selectedPluginIdx);
+						if (ImGui::Selectable(pluginNames[static_cast<std::size_t>(i)].c_str(), selected)) {
+							selectedPluginIdx = i;
+						}
+						if (selected) ImGui::SetItemDefaultFocus();
+					}
+					ImGui::EndCombo();
+				}
+				ImGui::SetItemTooltip("Choose the .esp/.esm/.esl that contains the perk (type to filter)");
+
+				if (selectedPluginIdx != prevPlugin || filteredPerks.empty()) {
+					filteredPerks.clear();
+					selectedPerkIdx = 0;
+					perkFilter[0] = '\0';
+					if (selectedPluginIdx >= 0 && selectedPluginIdx < static_cast<int>(pluginNames.size())) {
+						auto* dh = RE::TESDataHandler::GetSingleton();
+						if (dh) {
+							const auto& pname = pluginNames[static_cast<std::size_t>(selectedPluginIdx)];
+							for (auto* perk : dh->GetFormArray<RE::BGSPerk>()) {
+								if (!perk) continue;
+								auto* srcFile = perk->GetFile(0);
+								if (!srcFile || pname != srcFile->fileName) continue;
+								RE::FormID localID = perk->GetLocalFormID();
+								const char* edid = perk->GetFormEditorID();
+								std::string label;
+								if (edid && edid[0]) {
+									char buf[16]; snprintf(buf, sizeof(buf), "%X", localID);
+									label = std::string(edid) + " (0x" + buf + ")";
+								} else {
+									label = perk->GetName();
+									if (label.empty()) label = "(unnamed)";
+									char buf[16]; snprintf(buf, sizeof(buf), "%X", localID);
+									label += " (0x" + std::string(buf) + ")";
+								}
+								filteredPerks.push_back({ localID, label });
+							}
+						}
+					}
+				}
+
+				if (!filteredPerks.empty()) {
+					const char* perkPreview = (selectedPerkIdx >= 0 && selectedPerkIdx < static_cast<int>(filteredPerks.size()))
+						? filteredPerks[static_cast<std::size_t>(selectedPerkIdx)].second.c_str() : "";
+					ImGui::SetNextItemWidth(300.0f);
+					if (ImGui::BeginCombo("Perk##pick", perkPreview)) {
+						ImGui::SetNextItemWidth(-FLT_MIN);
+						if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+						ImGui::InputTextWithHint("##perkSearch", "Search...", perkFilter, sizeof(perkFilter));
+						for (int i = 0; i < static_cast<int>(filteredPerks.size()); ++i) {
+							if (perkFilter[0]) {
+								bool match = false;
+								const char* hay = filteredPerks[static_cast<std::size_t>(i)].second.c_str();
+								const char* needle = perkFilter;
+								for (const char* h = hay; *h; ++h) {
+									const char* a = h;
+									const char* b = needle;
+									while (*a && *b && ((*a | 32) == (*b | 32))) { ++a; ++b; }
+									if (!*b) { match = true; break; }
+								}
+								if (!match) continue;
+							}
+							const bool selected = (i == selectedPerkIdx);
+							if (ImGui::Selectable(filteredPerks[static_cast<std::size_t>(i)].second.c_str(), selected)) {
+								selectedPerkIdx = i;
+							}
+							if (selected) ImGui::SetItemDefaultFocus();
+						}
+						ImGui::EndCombo();
+					}
+					ImGui::SetItemTooltip("Select a perk from this plugin (type to filter)");
+
+					ImGui::SameLine();
+					if (ImGui::Button("Use##perk")) {
+						if (selectedPerkIdx >= 0 && selectedPerkIdx < static_cast<int>(filteredPerks.size())) {
+							const auto& pname = pluginNames[static_cast<std::size_t>(selectedPluginIdx)];
+							RE::FormID localID = filteredPerks[static_cast<std::size_t>(selectedPerkIdx)].first;
+							char idBuf[32];
+							snprintf(idBuf, sizeof(idBuf), "0x%X", localID);
+							std::string combined = pname + ":" + idBuf;
+							strncpy_s(s->helmetBypassPerkStr, combined.c_str(), s->kMaxFormIDStrChars - 1);
+							s->Save();
+							s->ResolveFormIDs();
+						}
+					}
+					ImGui::SetItemTooltip("Set this perk as the helmet bypass perk");
+				} else {
+					ImGui::TextDisabled("No perks found in selected plugin");
+				}
+			}
+		}
+
+		ImGui::Spacing();
 		if (ImGui::Checkbox("Level-based bypass", &s->enableHelmetLevelBypass)) s->Save();
 		ImGui::SetItemTooltip("When on, headshots bypass helmets if the target is significantly\nweaker (lower level) than the shooter.");
 		ImGui::BeginDisabled(!s->enableHelmetLevelBypass);
@@ -954,6 +1176,15 @@ namespace Menu
 		ImGui::SetItemTooltip("Blue component of the helmet highlight glow (0-1).");
 		if (ImGui::SliderFloat("Alpha##hlA", &s->highlightAlpha, 0.0f, 1.0f, "%.2f")) s->Save();
 		ImGui::SetItemTooltip("Opacity/intensity of the glow effect (0-1).\n0 = invisible, 1 = fully opaque.");
+		if (ImGui::Checkbox("Blink##hlBlink", &s->enableHighlightBlink)) s->Save();
+		ImGui::SetItemTooltip("Pulses the highlight alpha between 0 and the configured value,\nmaking the helmet glow blink on and off.");
+		ImGui::BeginDisabled(!s->enableHighlightBlink);
+		if (ImGui::SliderFloat("Blink frequency##hlFreq", &s->highlightBlinkFrequency, 0.1f, 10.0f, "%.1f Hz")) {
+			s->highlightBlinkFrequency = std::clamp(s->highlightBlinkFrequency, 0.1f, 10.0f);
+			s->Save();
+		}
+		ImGui::SetItemTooltip("How many full blink cycles per second.\n0.1 = very slow pulse, 10 = rapid strobe.\nDefault: 1.5 Hz.");
+		ImGui::EndDisabled();
 		ImGui::EndDisabled();
 
 		if (ImGui::Checkbox("Enable Map Marker", &s->enableHelmetMapMarker)) s->Save();
@@ -1027,8 +1258,8 @@ namespace Menu
 					ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "[OK]");
 				} else {
 					ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "[!]");
-				}
-				ImGui::SameLine();
+		}
+		ImGui::SameLine();
 				if (!entry.resolvedName.empty()) {
 					ImGui::Text("%s", entry.resolvedName.c_str());
 					ImGui::SameLine();
@@ -1037,7 +1268,7 @@ namespace Menu
 					ImGui::Text("%s:%s", entry.pluginName.c_str(), entry.formIDStr.c_str());
 				}
 				if (!entry.comment.empty()) {
-					ImGui::SameLine();
+		ImGui::SameLine();
 					ImGui::TextDisabled("(%s)", entry.comment.c_str());
 				}
 				ImGui::SameLine();
@@ -1054,7 +1285,7 @@ namespace Menu
 							newBuf += e.pluginName + ":" + e.formIDStr;
 						}
 						strncpy_s(s->spellAllowlistBuf, newBuf.c_str(), sizeof(s->spellAllowlistBuf) - 1);
-						s->Save();
+			s->Save();
 						s->ResolveSpellAllowlist();
 						ImGui::PopID();
 						break;
@@ -1077,6 +1308,8 @@ namespace Menu
 			static std::vector<std::string> pluginNames;
 			static std::vector<std::pair<RE::FormID, std::string>> filteredSpells;
 			static bool needRefresh = true;
+			static char spellPluginFilter[128] = "";
+			static char spellFilter[128] = "";
 
 			if (needRefresh) {
 				pluginNames.clear();
@@ -1091,27 +1324,50 @@ namespace Menu
 				needRefresh = false;
 				selectedPluginIdx = 0;
 				filteredSpells.clear();
+				spellPluginFilter[0] = '\0';
+				spellFilter[0] = '\0';
 			}
 
-			if (ImGui::Button("Refresh plugins")) needRefresh = true;
+			if (ImGui::Button("Refresh plugins##spell")) needRefresh = true;
 			ImGui::SetItemTooltip("Re-scan loaded plugins (use after enabling/disabling mods)");
 			ImGui::SameLine();
 
 			if (!pluginNames.empty()) {
 				int prevPlugin = selectedPluginIdx;
+				const char* pluginPreview = (selectedPluginIdx >= 0 && selectedPluginIdx < static_cast<int>(pluginNames.size()))
+					? pluginNames[static_cast<std::size_t>(selectedPluginIdx)].c_str() : "";
 				ImGui::SetNextItemWidth(200.0f);
-				ImGui::Combo("Plugin##spell", &selectedPluginIdx,
-					+[](void* data, int idx) -> const char* {
-						auto* names = static_cast<std::vector<std::string>*>(data);
-						if (idx < 0 || idx >= static_cast<int>(names->size())) return "";
-						return (*names)[static_cast<std::size_t>(idx)].c_str();
-					},
-					&pluginNames, static_cast<int>(pluginNames.size()));
-				ImGui::SetItemTooltip("Choose the .esp/.esm/.esl that contains the spell");
+				if (ImGui::BeginCombo("Plugin##spell", pluginPreview)) {
+					ImGui::SetNextItemWidth(-FLT_MIN);
+					if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+					ImGui::InputTextWithHint("##spellPluginSearch", "Search...", spellPluginFilter, sizeof(spellPluginFilter));
+					for (int i = 0; i < static_cast<int>(pluginNames.size()); ++i) {
+						if (spellPluginFilter[0]) {
+							bool match = false;
+							const char* hay = pluginNames[static_cast<std::size_t>(i)].c_str();
+							const char* needle = spellPluginFilter;
+							for (const char* h = hay; *h; ++h) {
+								const char* a = h;
+								const char* b = needle;
+								while (*a && *b && ((*a | 32) == (*b | 32))) { ++a; ++b; }
+								if (!*b) { match = true; break; }
+							}
+							if (!match) continue;
+						}
+						const bool selected = (i == selectedPluginIdx);
+						if (ImGui::Selectable(pluginNames[static_cast<std::size_t>(i)].c_str(), selected)) {
+							selectedPluginIdx = i;
+						}
+						if (selected) ImGui::SetItemDefaultFocus();
+					}
+					ImGui::EndCombo();
+				}
+				ImGui::SetItemTooltip("Choose the .esp/.esm/.esl that contains the spell (type to filter)");
 
 				if (selectedPluginIdx != prevPlugin || filteredSpells.empty()) {
 					filteredSpells.clear();
 					selectedSpellIdx = 0;
+					spellFilter[0] = '\0';
 					if (selectedPluginIdx >= 0 && selectedPluginIdx < static_cast<int>(pluginNames.size())) {
 						auto* dh = RE::TESDataHandler::GetSingleton();
 						if (dh) {
@@ -1147,15 +1403,35 @@ namespace Menu
 				}
 
 				if (!filteredSpells.empty()) {
+					const char* spellPreview = (selectedSpellIdx >= 0 && selectedSpellIdx < static_cast<int>(filteredSpells.size()))
+						? filteredSpells[static_cast<std::size_t>(selectedSpellIdx)].second.c_str() : "";
 					ImGui::SetNextItemWidth(300.0f);
-					ImGui::Combo("Spell##pick", &selectedSpellIdx,
-						+[](void* data, int idx) -> const char* {
-							auto* spells = static_cast<std::vector<std::pair<RE::FormID, std::string>>*>(data);
-							if (idx < 0 || idx >= static_cast<int>(spells->size())) return "";
-							return (*spells)[static_cast<std::size_t>(idx)].second.c_str();
-						},
-						&filteredSpells, static_cast<int>(filteredSpells.size()));
-					ImGui::SetItemTooltip("Only spells with a projectile effect are listed");
+					if (ImGui::BeginCombo("Spell##pick", spellPreview)) {
+						ImGui::SetNextItemWidth(-FLT_MIN);
+						if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+						ImGui::InputTextWithHint("##spellSearch", "Search...", spellFilter, sizeof(spellFilter));
+						for (int i = 0; i < static_cast<int>(filteredSpells.size()); ++i) {
+							if (spellFilter[0]) {
+								bool match = false;
+								const char* hay = filteredSpells[static_cast<std::size_t>(i)].second.c_str();
+								const char* needle = spellFilter;
+								for (const char* h = hay; *h; ++h) {
+									const char* a = h;
+									const char* b = needle;
+									while (*a && *b && ((*a | 32) == (*b | 32))) { ++a; ++b; }
+									if (!*b) { match = true; break; }
+								}
+								if (!match) continue;
+							}
+							const bool selected = (i == selectedSpellIdx);
+							if (ImGui::Selectable(filteredSpells[static_cast<std::size_t>(i)].second.c_str(), selected)) {
+								selectedSpellIdx = i;
+							}
+							if (selected) ImGui::SetItemDefaultFocus();
+						}
+						ImGui::EndCombo();
+					}
+					ImGui::SetItemTooltip("Only spells with a projectile effect are listed (type to filter)");
 
 					ImGui::SameLine();
 					if (ImGui::Button("Add")) {
@@ -1303,6 +1579,87 @@ namespace Menu
 		} else {
 			ImGui::TextDisabled("(Player not loaded - are you on the main menu?)");
 		}
+
+		ImGui::Separator();
+		ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.6f, 1.0f), "Bypass Perk Test");
+		ImGui::TextWrapped(
+			"Add/remove the vanilla Steady Hand perk (Archery tree) to test the bypass perk feature. "
+			"Set bypass perk to \"Skyrim.esm:0x103ADB\" on the Helmet page first.");
+		ImGui::Spacing();
+
+		{
+			static constexpr RE::FormID kSteadyHandFormID = 0x103ADB;
+			auto* testPlayer = RE::PlayerCharacter::GetSingleton();
+			RE::BGSPerk* steadyHand = testPlayer
+				? RE::TESForm::LookupByID<RE::BGSPerk>(kSteadyHandFormID) : nullptr;
+
+			bool hasPerk = (testPlayer && steadyHand && testPlayer->HasPerk(steadyHand));
+			ImGui::Text("Steady Hand (0x103ADB): %s", hasPerk ? "HAS PERK" : "does not have");
+
+			if (s->helmetBypassPerkForm) {
+				bool playerHasBypass = (testPlayer && testPlayer->HasPerk(s->helmetBypassPerkForm));
+				ImGui::Text("Configured bypass perk (%s): %s",
+					s->helmetBypassPerkStr, playerHasBypass ? "HAS PERK" : "does not have");
+			} else if (s->helmetBypassPerkStr[0]) {
+				ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Bypass perk not resolved: \"%s\"", s->helmetBypassPerkStr);
+			} else {
+				ImGui::TextDisabled("No bypass perk configured.");
+			}
+
+			ImGui::Spacing();
+			ImGui::BeginDisabled(!testPlayer || !steadyHand);
+			if (ImGui::Button("Add Steady Hand Perk")) {
+				if (testPlayer && steadyHand) {
+					SKSE::GetTaskInterface()->AddTask([steadyHand]() {
+						auto* p = RE::PlayerCharacter::GetSingleton();
+						if (p && !p->HasPerk(steadyHand)) {
+							p->AddPerk(steadyHand);
+							RE::DebugNotification("DEBUG: Added Steady Hand perk");
+							logger::info("DEBUG: added Steady Hand perk 0x103ADB");
+						}
+					});
+				}
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Remove Steady Hand Perk")) {
+				if (testPlayer && steadyHand) {
+					SKSE::GetTaskInterface()->AddTask([steadyHand]() {
+						auto* p = RE::PlayerCharacter::GetSingleton();
+						if (p && p->HasPerk(steadyHand)) {
+							p->RemovePerk(steadyHand);
+							RE::DebugNotification("DEBUG: Removed Steady Hand perk");
+							logger::info("DEBUG: removed Steady Hand perk 0x103ADB");
+						}
+					});
+				}
+			}
+			ImGui::EndDisabled();
+			ImGui::SetItemTooltip("Add/remove the Steady Hand perk to test the helmet bypass feature.\n"
+				"Set bypass perk to \"Skyrim.esm:0x103ADB\" on the Helmet page to test with this perk.");
+		}
+
+		ImGui::Separator();
+		ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.6f, 1.0f), "Debug Hit Zones");
+		ImGui::TextWrapped("Draws wireframe spheres at the headshot-eligible zone on nearby actors.");
+		if (ImGui::Checkbox("Show hit zones##debugHitZones", &s->enableDebugHitZones)) {
+			s->Save();
+			if (s->enableDebugHitZones) {
+				Render::InstallHooks();
+				if (Render::HasContext()) {
+					DrawHandler::GetSingleton()->Initialize();
+				}
+			}
+		}
+		ImGui::SetItemTooltip("Draws wireframe spheres at the headshot-eligible zone on nearby actors.\n"
+			"Cyan = head zone, magenta = dragon eye zone.\nRequires a save/load after enabling for the first time.");
+
+		ImGui::BeginDisabled(!s->enableDebugHitZones);
+		if (ImGui::SliderFloat("Display radius##debugRadius", &s->debugHitZoneRadius, 500.0f, 5000.0f, "%.0f units")) {
+			s->debugHitZoneRadius = std::clamp(s->debugHitZoneRadius, 500.0f, 5000.0f);
+			s->Save();
+		}
+		ImGui::SetItemTooltip("Only draw hit zones for actors within this distance from the player.\nDefault: 2000 units.");
+		ImGui::EndDisabled();
 
 		ImGui::Separator();
 		ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "How Head Detection Works");

@@ -41,24 +41,36 @@ namespace Hooks
 		{
 			static bool thunk(RE::Projectile* a_projectile)
 			{
-				if (a_projectile) {
-					__try {
+				__try {
+					if (a_projectile) {
 						HeadshotLogic::OnProjectileImpact(a_projectile);
-					} __except (EXCEPTION_EXECUTE_HANDLER) {
+					}
+				} __except (EXCEPTION_EXECUTE_HANDLER) {
+					static std::uint64_t lastLogTick = 0;
+					auto now = QpcNow();
+					if (now - lastLogTick > 10000000ULL) {
 						logger::error("HeadshotsKill: exception in OnProjectileImpact (code=0x{:X})",
 							static_cast<unsigned>(GetExceptionCode()));
+						lastLogTick = now;
 					}
 				}
+
 				bool result = func(a_projectile);
 
-				if (a_projectile) {
-					__try {
+				__try {
+					if (a_projectile) {
 						HeadshotLogic::PostImpactStickFix(a_projectile);
-					} __except (EXCEPTION_EXECUTE_HANDLER) {
+					}
+				} __except (EXCEPTION_EXECUTE_HANDLER) {
+					static std::uint64_t lastLogTick2 = 0;
+					auto now = QpcNow();
+					if (now - lastLogTick2 > 10000000ULL) {
 						logger::error("HeadshotsKill: exception in PostImpactStickFix (code=0x{:X})",
 							static_cast<unsigned>(GetExceptionCode()));
+						lastLogTick2 = now;
 					}
 				}
+
 				return result;
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
@@ -135,7 +147,7 @@ void Hooks::RegisterBareHead(RE::FormID a_actorFormID)
 
 bool Hooks::IsBareHead(RE::Actor* a_actor)
 {
-	if (!a_actor) return false;
+	if (!a_actor || a_actor->IsDeleted() || !a_actor->Is3DLoaded()) return false;
 	{
 		std::lock_guard lock(g_bareHeadsMutex);
 		if (!g_bareHeads.count(a_actor->GetFormID())) {
@@ -179,21 +191,35 @@ void Hooks::Install()
 
 	{
 		auto hook = Reloc::Address(RelocId::ProjectileImpact);
-		if (*reinterpret_cast<std::uint16_t*>(hook.address()) != 0x90FF) {
-			logger::critical("HeadshotsKill: ProjectileImpact site mismatch");
-			stl::report_and_fail("HeadshotsKill: ProjectileImpact hook failed"sv);
+		const auto firstByte = *reinterpret_cast<std::uint8_t*>(hook.address());
+		const auto firstWord = *reinterpret_cast<std::uint16_t*>(hook.address());
+
+		if (firstWord == 0x90FF) {
+			// Original 6-byte indirect call: NOP-fill then write our 5-byte call
+			REL::safe_fill(hook.address(), 0x90, 6);
+			WriteThunkCall5<ProjectileImpactHook>(hook.address());
+		} else if (firstByte == 0xE8) {
+			// Another mod already placed a 5-byte relative call here; chain through it
+			WriteThunkCall5<ProjectileImpactHook>(hook.address());
+		} else {
+			logger::critical("HeadshotsKill: ProjectileImpact site has unexpected bytes (0x{:02X}{:02X})",
+				firstByte, *reinterpret_cast<std::uint8_t*>(hook.address() + 1));
+			logger::critical("HeadshotsKill: hook NOT installed - headshot detection disabled");
+			return;
 		}
-		REL::safe_fill(hook.address(), 0x90, 6);
-		WriteThunkCall5<ProjectileImpactHook>(hook.address());
 	}
 
 	{
 		auto hook = Reloc::Address(RelocId::HandleProjectileAttack);
-		if (*reinterpret_cast<std::uint8_t*>(hook.address()) != 0xE8) {
-			logger::critical("HeadshotsKill: HandleProjectileAttack site mismatch");
-			stl::report_and_fail("HeadshotsKill: HandleProjectileAttack hook failed"sv);
+		const auto firstByte = *reinterpret_cast<std::uint8_t*>(hook.address());
+		if (firstByte == 0xE8) {
+			WriteThunkCall5<HandleProjectileAttackHook>(hook.address());
+		} else {
+			logger::critical("HeadshotsKill: HandleProjectileAttack site has unexpected byte (0x{:02X})",
+				firstByte);
+			logger::critical("HeadshotsKill: hit-data hook NOT installed - OHKO disabled");
+			return;
 		}
-		WriteThunkCall5<HandleProjectileAttackHook>(hook.address());
 	}
 
 	logger::info("HeadshotsKill: hooks installed");
@@ -205,17 +231,30 @@ void Hooks::StartPeriodicTrackerUpdate()
 	if (running.exchange(true)) return;
 
 	std::thread([]() {
+		auto lastFullUpdate = std::chrono::steady_clock::now();
 		while (true) {
-			std::this_thread::sleep_for(std::chrono::milliseconds(500));
+			auto* settings = Settings::GetSingleton();
+			const bool blinking = settings->enableHelmetHighlight && settings->enableHighlightBlink;
+			const auto interval = blinking ? std::chrono::milliseconds(50) : std::chrono::milliseconds(500);
+			std::this_thread::sleep_for(interval);
+
 			auto* tracker = PlayerHelmetTracker::GetSingleton();
 			if (!tracker->IsTracking()) {
 				running.store(false);
 				return;
 			}
-			SKSE::GetTaskInterface()->AddTask([]() {
+
+			const auto now = std::chrono::steady_clock::now();
+			const bool doFullUpdate = (now - lastFullUpdate) >= std::chrono::milliseconds(500);
+			if (doFullUpdate) lastFullUpdate = now;
+
+			SKSE::GetTaskInterface()->AddTask([doFullUpdate]() {
 				auto* tracker = PlayerHelmetTracker::GetSingleton();
-				if (tracker->IsTracking()) {
+				if (!tracker->IsTracking()) return;
+				if (doFullUpdate) {
 					tracker->Update();
+				} else {
+					tracker->UpdateHighlightOnly();
 				}
 			});
 		}

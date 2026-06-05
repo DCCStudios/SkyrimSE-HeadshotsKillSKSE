@@ -4,6 +4,8 @@
 #include <Windows.h>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <mutex>
 #include <mmsystem.h>
 
 #pragma comment(lib, "winmm.lib")
@@ -39,7 +41,9 @@ namespace
 	};
 #pragma pack(pop)
 
-	std::vector<std::uint8_t> g_headshotKillAudioBuffer;
+	std::mutex g_audioMutex;
+	std::shared_ptr<std::vector<std::uint8_t>> g_headshotKillAudioBuffer;
+	std::shared_ptr<std::vector<std::uint8_t>> g_knockoffAudioBuffer;
 
 	bool LoadWAVWithVolume(const std::filesystem::path& filePath, float volumeScale,
 		std::vector<std::uint8_t>& outBuffer)
@@ -74,16 +78,24 @@ namespace
 
 		while (pos + sizeof(WAVChunkHeader) <= outBuffer.size()) {
 			auto* chunk = reinterpret_cast<WAVChunkHeader*>(outBuffer.data() + pos);
+			const std::size_t chunkDataStart = pos + sizeof(WAVChunkHeader);
+			const std::size_t chunkDataEnd = chunkDataStart + chunk->size;
+
+			if (chunkDataEnd > outBuffer.size() || chunkDataEnd < chunkDataStart) {
+				break;
+			}
 
 			if (std::memcmp(chunk->id, "fmt ", 4) == 0) {
-				fmt = reinterpret_cast<WAVFmtChunk*>(outBuffer.data() + pos + sizeof(WAVChunkHeader));
+				if (chunk->size >= sizeof(WAVFmtChunk)) {
+					fmt = reinterpret_cast<WAVFmtChunk*>(outBuffer.data() + chunkDataStart);
+				}
 			} else if (std::memcmp(chunk->id, "data", 4) == 0) {
-				audioData = outBuffer.data() + pos + sizeof(WAVChunkHeader);
+				audioData = outBuffer.data() + chunkDataStart;
 				audioDataSize = chunk->size;
 				break;
 			}
 
-			pos += sizeof(WAVChunkHeader) + chunk->size;
+			pos = chunkDataEnd;
 			if (pos % 2 != 0) {
 				++pos;
 			}
@@ -190,15 +202,18 @@ void PlayHeadshotKillSound()
 			logger::warn("HeadshotsKill: headshot kill WAV not found: {}", wavPath.string());
 			return;
 		}
-		if (!LoadWAVWithVolume(wavPath, vol, g_headshotKillAudioBuffer)) {
+		auto buffer = std::make_shared<std::vector<std::uint8_t>>();
+		std::lock_guard lock(g_audioMutex);
+		if (!LoadWAVWithVolume(wavPath, vol, *buffer)) {
 			logger::error("HeadshotsKill: failed to load WAV: {}", wavPath.string());
 			return;
 		}
-		const BOOL ok = PlaySoundA(reinterpret_cast<LPCSTR>(g_headshotKillAudioBuffer.data()),
+		const BOOL ok = PlaySoundA(reinterpret_cast<LPCSTR>(buffer->data()),
 			nullptr, SND_MEMORY | SND_ASYNC | SND_NODEFAULT);
 		if (!ok) {
 			logger::error("HeadshotsKill: PlaySoundA failed (GetLastError={})", GetLastError());
 		}
+		g_headshotKillAudioBuffer = buffer;
 	});
 }
 
@@ -273,24 +288,25 @@ void PlayPlayerHelmetKnockoffSound(RE::FormID a_armorFormID)
 	const std::string baseName = metal ? "helmetknockoff_metal.wav" : "helmetknockoff.wav";
 	const std::string chosen = PickRandomKnockoffVariant(baseName);
 
-	static std::vector<std::uint8_t> s_knockoffAudioBuffer;
-
 	SKSE::GetTaskInterface()->AddTask([chosen, vol]() {
 		const auto wavPath = ResolveWavPath(chosen);
 		if (!std::filesystem::exists(wavPath)) {
 			logger::warn("HeadshotsKill: player knockoff WAV not found: {}", wavPath.string());
 			return;
 		}
-		if (!LoadWAVWithVolume(wavPath, vol, s_knockoffAudioBuffer)) {
+		auto buffer = std::make_shared<std::vector<std::uint8_t>>();
+		std::lock_guard lock(g_audioMutex);
+		if (!LoadWAVWithVolume(wavPath, vol, *buffer)) {
 			logger::error("HeadshotsKill: failed to load player knockoff WAV: {}", wavPath.string());
 			return;
 		}
-		const BOOL ok = PlaySoundA(reinterpret_cast<LPCSTR>(s_knockoffAudioBuffer.data()),
+		const BOOL ok = PlaySoundA(reinterpret_cast<LPCSTR>(buffer->data()),
 			nullptr, SND_MEMORY | SND_ASYNC | SND_NODEFAULT);
 		if (!ok) {
 			logger::error("HeadshotsKill: PlaySoundA failed for knockoff (GetLastError={})", GetLastError());
 		} else {
 			logger::debug("HeadshotsKill: played knockoff sound: {} (vol={:.2f})", chosen, vol);
 		}
+		g_knockoffAudioBuffer = buffer;
 	});
 }

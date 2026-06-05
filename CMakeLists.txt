@@ -26,9 +26,13 @@ add_commonlibsse_plugin(${PROJECT_NAME} SOURCES
 	src/HeadshotLogic.cpp
 	src/HeadshotSound.cpp
 	src/PlayerHelmetTracker.cpp
+	src/render/D3DContext.cpp
+	src/render/LineDrawer.cpp
+	src/render/DrawHandler.cpp
 )
 
 target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_23)
+target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_precompile_headers(${PROJECT_NAME} PRIVATE src/PCH.h)
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
