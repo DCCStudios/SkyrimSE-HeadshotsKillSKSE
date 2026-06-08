@@ -655,6 +655,13 @@ namespace HeadshotLogic
 
 		// HasProtectiveHeadArmor moved to public API (HeadshotLogic::HasProtectiveHeadArmor)
 
+		bool IsArmorNotClothing(RE::TESObjectARMO* ar)
+		{
+			auto type = ar->GetArmorType();
+			return type == RE::BGSBipedObjectForm::ArmorType::kLightArmor ||
+			       type == RE::BGSBipedObjectForm::ArmorType::kHeavyArmor;
+		}
+
 		bool HasKnockoffableHeadArmor(RE::Actor* a_actor, Settings* a_s, RE::TESObjectARMO*& a_outArmor)
 		{
 			a_outArmor = nullptr;
@@ -670,6 +677,7 @@ namespace HeadshotLogic
 					(a_s->knockoffCirclets && ar->HasPartOf(RE::BIPED_MODEL::BipedObjectSlot::kCirclet));
 				if (!headish) continue;
 				if (ar->HasPartOf(RE::BIPED_MODEL::BipedObjectSlot::kBody)) continue;
+				if (!IsArmorNotClothing(ar)) continue;
 				a_outArmor = ar;
 				return true;
 			}
@@ -1199,7 +1207,8 @@ void HeadshotLogic::EvaluateHitData(RE::Character* a_character, RE::HitData* a_h
 				for (auto* entry : *pChanges->entryList) {
 					if (entry && entry->object && entry->IsWorn()) {
 						auto* armo = entry->object->As<RE::TESObjectARMO>();
-						if (armo && armo->HasPartOf(RE::BGSBipedObjectForm::BipedObjectSlot::kHead)) {
+						if (armo && armo->HasPartOf(RE::BGSBipedObjectForm::BipedObjectSlot::kHead) &&
+						    IsArmorNotClothing(armo)) {
 							playerHelmet = armo;
 							break;
 						}
@@ -1394,6 +1403,7 @@ bool HeadshotLogic::HasProtectiveHeadArmor(RE::Actor* a_actor)
 			ar->HasPartOf(RE::BIPED_MODEL::BipedObjectSlot::kHead) ||
 			ar->HasPartOf(RE::BIPED_MODEL::BipedObjectSlot::kHair);
 		if (!coversHead || ar->HasPartOf(RE::BIPED_MODEL::BipedObjectSlot::kBody)) continue;
+		if (!IsArmorNotClothing(ar)) continue;
 		if (ar->GetArmorRating() > 0) return true;
 	}
 	return false;
@@ -1420,6 +1430,7 @@ void HeadshotLogic::SimulatePlayerHelmetKnockoff(RE::Actor* a_player, Settings* 
 				ar->HasPartOf(RE::BIPED_MODEL::BipedObjectSlot::kHead) ||
 				ar->HasPartOf(RE::BIPED_MODEL::BipedObjectSlot::kHair);
 			if (!coversHead || ar->HasPartOf(RE::BIPED_MODEL::BipedObjectSlot::kBody)) continue;
+			if (!IsArmorNotClothing(ar)) continue;
 			if (ar->GetArmorRating() > 0) {
 				armor = ar;
 				break;
@@ -1534,7 +1545,8 @@ RE::BSEventNotifyControl HeadshotLogic::MeleeHitHandler::ProcessEvent(
 		for (auto* entry : *changes->entryList) {
 			if (entry && entry->object && entry->IsWorn()) {
 				auto* armo = entry->object->As<RE::TESObjectARMO>();
-				if (armo && armo->HasPartOf(RE::BGSBipedObjectForm::BipedObjectSlot::kHead)) {
+				if (armo && armo->HasPartOf(RE::BGSBipedObjectForm::BipedObjectSlot::kHead) &&
+				    IsArmorNotClothing(armo)) {
 					helmet = armo;
 					break;
 				}
@@ -1656,7 +1668,8 @@ static void PrecisionPostHitCallback_Impl(const PRECISION_API::PrecisionHitData&
 		for (auto* entry : *changes->entryList) {
 			if (entry && entry->object && entry->IsWorn()) {
 				auto* armo = entry->object->As<RE::TESObjectARMO>();
-				if (armo && armo->HasPartOf(RE::BGSBipedObjectForm::BipedObjectSlot::kHead)) {
+				if (armo && armo->HasPartOf(RE::BGSBipedObjectForm::BipedObjectSlot::kHead) &&
+				    IsArmorNotClothing(armo)) {
 					helmet = armo;
 					break;
 				}

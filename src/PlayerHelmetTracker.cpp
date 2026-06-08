@@ -73,7 +73,10 @@ void PlayerHelmetTracker::Update()
 				if (ar->GetFormID() == trackedArmorFormID) continue;
 				if (ar->HasPartOf(RE::BIPED_MODEL::BipedObjectSlot::kHead) ||
 				    ar->HasPartOf(RE::BIPED_MODEL::BipedObjectSlot::kHair)) {
-					if (ar->GetArmorRating() > 0) {
+					auto armorType = ar->GetArmorType();
+					bool isRealArmor = (armorType == RE::BGSBipedObjectForm::ArmorType::kLightArmor ||
+					                    armorType == RE::BGSBipedObjectForm::ArmorType::kHeavyArmor);
+					if (isRealArmor && ar->GetArmorRating() > 0) {
 						StopTracking();
 						return;
 					}
