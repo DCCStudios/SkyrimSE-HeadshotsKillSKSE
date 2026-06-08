@@ -671,13 +671,15 @@ namespace HeadshotLogic
 				if (!entry || !entry->object || !entry->IsWorn()) continue;
 				auto* ar = entry->object->As<RE::TESObjectARMO>();
 				if (!ar) continue;
+				const bool isCircletSlot =
+					a_s->knockoffCirclets && ar->HasPartOf(RE::BIPED_MODEL::BipedObjectSlot::kCirclet);
 				const bool headish =
 					ar->HasPartOf(RE::BIPED_MODEL::BipedObjectSlot::kHead) ||
 					ar->HasPartOf(RE::BIPED_MODEL::BipedObjectSlot::kHair) ||
-					(a_s->knockoffCirclets && ar->HasPartOf(RE::BIPED_MODEL::BipedObjectSlot::kCirclet));
+					isCircletSlot;
 				if (!headish) continue;
 				if (ar->HasPartOf(RE::BIPED_MODEL::BipedObjectSlot::kBody)) continue;
-				if (!IsArmorNotClothing(ar)) continue;
+				if (!isCircletSlot && !IsArmorNotClothing(ar)) continue;
 				a_outArmor = ar;
 				return true;
 			}
